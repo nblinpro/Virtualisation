@@ -1,0 +1,80 @@
+---
+# =============================================================================
+# Role lb_haproxy - HAProxy + Keepalived
+# =============================================================================
+
+- name: Installer sudo et les pre-requis
+  ansible.builtin.apt:
+    name:
+      - sudo
+      - curl
+      - ca-certificates
+    state: present
+    update_cache: true
+
+- name: Installer HAProxy et Keepalived
+  ansible.builtin.apt:
+    name:
+      - haproxy
+      - keepalived
+    state: present
+
+# =============================================================================
+# Configuration noyau pour permettre a HAProxy d'ecouter sur la VIP
+# =============================================================================
+- name: Activer ip_nonlocal_bind (HAProxy peut bind sur la VIP)
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_nonlocal_bind
+    value: '1'
+    sysctl_set: true
+    state: present
+    reload: true
+  failed_when: false  # Echec OK si LXC interdit (on aura quand meme le service)
+
+# =============================================================================
+# Configuration HAProxy
+# =============================================================================
+- name: Deployer la config HAProxy
+  ansible.builtin.template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+    validate: 'haproxy -f %s -c'
+  notify: restart haproxy
+
+- name: S'assurer que HAProxy est demarre
+  ansible.builtin.systemd:
+    name: haproxy
+    state: started
+    enabled: true
+
+# =============================================================================
+# Configuration Keepalived
+# =============================================================================
+- name: Creer le script de check HAProxy pour Keepalived
+  ansible.builtin.copy:
+    dest: /etc/keepalived/check_haproxy.sh
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      # Verifie que HAProxy tourne
+      pgrep -x haproxy >/dev/null
+
+- name: Deployer la config Keepalived
+  ansible.builtin.template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  notify: restart keepalived
+
+- name: S'assurer que Keepalived est demarre
+  ansible.builtin.systemd:
+    name: keepalived
+    state: started
+    enabled: true

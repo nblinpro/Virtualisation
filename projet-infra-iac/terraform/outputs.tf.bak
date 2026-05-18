@@ -1,0 +1,47 @@
+###############################################################################
+# Outputs Terraform - genere l'inventaire Ansible avec dns + db
+###############################################################################
+
+output "dns_01_ip" {
+  description = "IP du LXC dns-01"
+  value       = "10.0.20.10"
+}
+
+output "pgsql_01_ip" {
+  description = "IP du LXC pgsql-01"
+  value       = "10.0.50.10"
+}
+
+output "summary" {
+  description = "Resume des LXC deployes"
+  value = {
+    "dns-01"   = "10.0.20.10 (pve-02, VLAN 20)"
+    "pgsql-01" = "10.0.50.10 (pve-03, VLAN 50)"
+  }
+}
+
+resource "local_file" "ansible_inventory" {
+  filename = "${path.module}/../ansible/inventory.ini"
+  content  = <<-EOT
+    # =============================================================================
+    # Inventaire Ansible - genere automatiquement par Terraform
+    # NE PAS EDITER A LA MAIN
+    # =============================================================================
+
+    [dns_servers]
+    dns-01 ansible_host=10.0.20.10
+
+    [database_servers]
+    pgsql-01 ansible_host=10.0.50.10
+
+    [infra:children]
+    dns_servers
+    database_servers
+
+    [infra:vars]
+    ansible_user=root
+    ansible_ssh_private_key_file=~/.ssh/proxmox_lab
+    ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+    ansible_python_interpreter=/usr/bin/python3
+  EOT
+}

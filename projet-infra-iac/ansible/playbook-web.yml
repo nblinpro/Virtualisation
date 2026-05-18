@@ -1,0 +1,72 @@
+---
+# =============================================================================
+# Playbook : Deploiement du cluster web HA
+# =============================================================================
+
+- name: Configuration des serveurs web (web-01, web-02, web-03)
+  hosts: web_servers
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Attendre que le LXC soit accessible en SSH
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 120
+
+    - name: Mise a jour du cache APT
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+  roles:
+    - web_nginx
+
+  post_tasks:
+    - name: Tester l'endpoint health.txt
+      ansible.builtin.uri:
+        url: "http://localhost/health.txt"
+        return_content: true
+      register: health_check
+      changed_when: false
+
+    - name: Resume web
+      ansible.builtin.debug:
+        msg: "{{ ansible_hostname }} : Nginx OK, health={{ health_check.content | trim }}"
+
+- name: Configuration des load balancers (lb-01 MASTER, lb-02 BACKUP)
+  hosts: load_balancers
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Attendre que le LXC soit accessible en SSH
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 120
+
+    - name: Mise a jour du cache APT
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+  roles:
+    - lb_haproxy
+
+  post_tasks:
+    - name: Verifier que HAProxy est actif
+      ansible.builtin.command: systemctl is-active haproxy
+      register: ha_status
+      changed_when: false
+
+    - name: Verifier que Keepalived est actif
+      ansible.builtin.command: systemctl is-active keepalived
+      register: kp_status
+      changed_when: false
+
+    - name: Resume LB
+      ansible.builtin.debug:
+        msg:
+          - "{{ ansible_hostname }} ({{ keepalived_state }})"
+          - "HAProxy : {{ ha_status.stdout }}"
+          - "Keepalived : {{ kp_status.stdout }}"

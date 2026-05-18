@@ -1,0 +1,22 @@
+---
+# Variables par defaut pour le role web_nginx
+
+# Application
+app_name: webapp
+app_webroot: /var/www/webapp
+app_user: www-data
+app_group: www-data
+
+# Base de donnees (connexion depuis l'application PHP)
+db_host: pgsql-01.infra.lan
+db_port: 5432
+db_name: webapp_db
+db_user: webapp
+db_password: "WebApp2026!ChangeMe"
+
+# PHP
+php_version: "8.4"
+
+# Nginx
+nginx_listen_port: 80
+nginx_server_name: web.infra.lan

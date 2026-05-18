@@ -1,0 +1,49 @@
+---
+# =============================================================================
+# Playbook : Deploiement de dns-01 (Unbound)
+# Projet Virtualisation M1
+# =============================================================================
+
+- name: Configuration du serveur DNS interne (dns-01)
+  hosts: dns_servers
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Attendre que le LXC soit accessible en SSH
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 120
+
+    - name: Mise a jour du cache APT
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+  roles:
+    - dns_unbound
+
+  post_tasks:
+    - name: Verifier que Unbound est actif et fonctionne
+      ansible.builtin.command: systemctl is-active unbound
+      register: unbound_status
+      changed_when: false
+
+    - name: Tester une resolution interne (pve-01.infra.lan)
+      ansible.builtin.command: dig @127.0.0.1 +short pve-01.infra.lan
+      register: dig_internal
+      changed_when: false
+      failed_when: false
+
+    - name: Tester une resolution externe (google.com)
+      ansible.builtin.command: dig @127.0.0.1 +short google.com
+      register: dig_external
+      changed_when: false
+      failed_when: false
+
+    - name: Resume des tests
+      ansible.builtin.debug:
+        msg:
+          - "Statut Unbound : {{ unbound_status.stdout }}"
+          - "Resolution interne : {{ dig_internal.stdout | default('echec') }}"
+          - "Resolution externe : {{ 'OK' if dig_external.stdout else 'echec' }}"

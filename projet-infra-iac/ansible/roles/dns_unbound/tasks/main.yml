@@ -1,0 +1,88 @@
+---
+# =============================================================================
+# Role dns_unbound - Tasks principales
+# =============================================================================
+
+- name: Installer les paquets necessaires
+  ansible.builtin.apt:
+    name:
+      - unbound
+      - dnsutils
+      - ca-certificates
+      - curl
+    state: present
+
+- name: Creer le repertoire /var/lib/unbound
+  ansible.builtin.file:
+    path: /var/lib/unbound
+    state: directory
+    owner: unbound
+    group: unbound
+    mode: '0755'
+
+- name: Telecharger les root hints (serveurs DNS racines)
+  ansible.builtin.get_url:
+    url: https://www.internic.net/domain/named.cache
+    dest: /var/lib/unbound/root.hints
+    owner: unbound
+    group: unbound
+    mode: '0644'
+    force: false  # Ne re-telecharge pas si deja present
+
+- name: Creer le repertoire de logs Unbound
+  ansible.builtin.file:
+    path: /var/log/unbound
+    state: directory
+    owner: unbound
+    group: unbound
+    mode: '0755'
+
+- name: Desactiver systemd-resolved (conflit port 53)
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    state: stopped
+    enabled: false
+  failed_when: false  # Pas grave si le service n'existe pas
+
+- name: Supprimer le lien /etc/resolv.conf si symbolique vers systemd-resolved
+  ansible.builtin.file:
+    path: /etc/resolv.conf
+    state: absent
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Recreer /etc/resolv.conf pointant vers Unbound local
+  ansible.builtin.copy:
+    dest: /etc/resolv.conf
+    content: |
+      # Unbound local resolver
+      nameserver 127.0.0.1
+      search infra.lan
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Deployer la configuration Unbound infra-lan
+  ansible.builtin.template:
+    src: infra-lan.conf.j2
+    dest: /etc/unbound/unbound.conf.d/infra-lan.conf
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  notify: restart unbound
+
+- name: Verifier la syntaxe de la configuration Unbound
+  ansible.builtin.command: unbound-checkconf
+  register: unbound_check
+  changed_when: false
+
+- name: Afficher le resultat de la verification
+  ansible.builtin.debug:
+    msg: "{{ unbound_check.stdout }}"
+
+- name: Activer et demarrer Unbound
+  ansible.builtin.systemd:
+    name: unbound
+    state: started
+    enabled: true
+    daemon_reload: true

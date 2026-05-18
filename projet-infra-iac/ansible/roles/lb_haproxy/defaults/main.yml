@@ -1,0 +1,20 @@
+---
+# Defaults pour HAProxy + Keepalived
+
+# VIP partagee entre les 2 LB
+keepalived_vip: 10.0.40.10
+keepalived_interface: eth0
+keepalived_virtual_router_id: 51
+keepalived_auth_password: "Ynov2026!HA"
+
+# Backends web (les 3 LXC web-XX)
+haproxy_backends:
+  - { name: "web-01", address: "10.0.40.11", port: 80 }
+  - { name: "web-02", address: "10.0.40.12", port: 80 }
+  - { name: "web-03", address: "10.0.40.13", port: 80 }
+
+# Front HAProxy
+haproxy_frontend_port: 80
+haproxy_stats_port: 8404
+haproxy_stats_user: admin
+haproxy_stats_password: "Stats2026!"

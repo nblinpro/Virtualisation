@@ -1,0 +1,69 @@
+---
+# =============================================================================
+# Playbook : Deploiement de pgsql-01 (PostgreSQL 17)
+# =============================================================================
+
+- name: Configuration du serveur de base de donnees (pgsql-01)
+  hosts: database_servers
+  become: true
+  gather_facts: true
+
+  vars:
+    # Surcharge des defaults du role
+    postgres_db_name: "{{ db_name | default('webapp_db') }}"
+    postgres_db_user: "{{ db_user | default('webapp') }}"
+    postgres_db_password: "{{ db_password | default('WebApp2026!ChangeMe') }}"
+    # Pour activer la restauration : -e postgres_restore_dump=true
+    postgres_restore_dump: "{{ restore_dump | default(false) }}"
+
+  pre_tasks:
+    - name: Attendre que le LXC soit accessible en SSH
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 120
+
+    - name: Mise a jour du cache APT
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Installer les collections Ansible necessaires
+      ansible.builtin.command: ansible-galaxy collection install community.postgresql
+      delegate_to: localhost
+      become: false
+      run_once: true
+      changed_when: false
+      failed_when: false
+
+  roles:
+    - db_postgres
+
+  post_tasks:
+    - name: Verifier que PostgreSQL est actif
+      ansible.builtin.command: systemctl is-active postgresql
+      register: pg_status
+      changed_when: false
+
+    - name: Tester la connexion locale a la BDD
+      ansible.builtin.command: >
+        psql -U postgres -d {{ postgres_db_name }} -c "SELECT version();"
+      become: true
+      become_user: postgres
+      register: pg_version_test
+      changed_when: false
+
+    - name: Lister les bases de donnees
+      ansible.builtin.command: psql -U postgres -l
+      become: true
+      become_user: postgres
+      register: pg_databases
+      changed_when: false
+
+    - name: Resume du deploiement
+      ansible.builtin.debug:
+        msg:
+          - "Statut PostgreSQL : {{ pg_status.stdout }}"
+          - "Version : {{ pg_version_test.stdout_lines[2] | default('N/A') }}"
+          - "Base creee : {{ postgres_db_name }}"
+          - "Utilisateur applicatif : {{ postgres_db_user }}"
+          - "Ecoute sur : 10.0.50.10:5432"

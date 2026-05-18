@@ -1,0 +1,159 @@
+---
+# =============================================================================
+# Role db_postgres - Installation et configuration PostgreSQL 17
+# =============================================================================
+
+- name: Installer les pre-requis APT
+  ansible.builtin.apt:
+    name:
+      - sudo
+      - curl
+      - gnupg2
+      - ca-certificates
+      - python3-psycopg2  # Necessaire pour les modules ansible postgresql_*
+      - acl
+    state: present
+    update_cache: true
+
+- name: Ajouter la cle GPG du depot PostgreSQL officiel
+  ansible.builtin.get_url:
+    url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+    dest: /etc/apt/keyrings/postgres.asc
+    mode: '0644'
+    force: false
+
+- name: Ajouter le depot PostgreSQL officiel
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/postgres.asc] http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
+    state: present
+    filename: postgresql
+
+- name: Installer PostgreSQL {{ postgres_version }}
+  ansible.builtin.apt:
+    name:
+      - "postgresql-{{ postgres_version }}"
+      - "postgresql-client-{{ postgres_version }}"
+      - "postgresql-contrib-{{ postgres_version }}"
+    state: present
+    update_cache: true
+
+- name: S'assurer que PostgreSQL est demarre
+  ansible.builtin.systemd:
+    name: postgresql
+    state: started
+    enabled: true
+
+# =============================================================================
+# Configuration postgresql.conf - ecoute reseau
+# =============================================================================
+- name: Configurer postgresql.conf (listen_addresses)
+  ansible.builtin.lineinfile:
+    path: "/etc/postgresql/{{ postgres_version }}/main/postgresql.conf"
+    regexp: "^#?listen_addresses"
+    line: "listen_addresses = '{{ postgres_listen_addresses }}'"
+    backup: true
+  notify: restart postgresql
+
+- name: Configurer postgresql.conf (port)
+  ansible.builtin.lineinfile:
+    path: "/etc/postgresql/{{ postgres_version }}/main/postgresql.conf"
+    regexp: "^#?port"
+    line: "port = {{ postgres_port }}"
+  notify: restart postgresql
+
+# =============================================================================
+# Configuration pg_hba.conf - autorisations reseau
+# =============================================================================
+- name: Deployer pg_hba.conf
+  ansible.builtin.template:
+    src: pg_hba.conf.j2
+    dest: "/etc/postgresql/{{ postgres_version }}/main/pg_hba.conf"
+    owner: postgres
+    group: postgres
+    mode: '0640'
+    backup: true
+  notify: restart postgresql
+
+# =============================================================================
+# Application immediate de la config (avant les operations sur la BDD)
+# =============================================================================
+- name: Redemarrer PostgreSQL pour appliquer la config reseau
+  ansible.builtin.systemd:
+    name: postgresql
+    state: restarted
+
+- name: Attendre que PostgreSQL ecoute sur le port {{ postgres_port }}
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ postgres_port }}"
+    timeout: 30
+
+# =============================================================================
+# Creation de la base de donnees applicative
+# =============================================================================
+- name: Creer l'utilisateur applicatif {{ postgres_db_user }}
+  community.postgresql.postgresql_user:
+    name: "{{ postgres_db_user }}"
+    password: "{{ postgres_db_password }}"
+    encrypted: true
+    state: present
+  become: true
+  become_user: postgres
+
+- name: Creer la base de donnees {{ postgres_db_name }}
+  community.postgresql.postgresql_db:
+    name: "{{ postgres_db_name }}"
+    owner: "{{ postgres_db_user }}"
+    encoding: "{{ postgres_encoding }}"
+    template: template0
+    state: present
+  become: true
+  become_user: postgres
+
+- name: Accorder tous les droits sur la BDD a {{ postgres_db_user }}
+  community.postgresql.postgresql_privs:
+    database: "{{ postgres_db_name }}"
+    type: database
+    privs: ALL
+    role: "{{ postgres_db_user }}"
+  become: true
+  become_user: postgres
+
+# =============================================================================
+# Restauration optionnelle d'un dump
+# =============================================================================
+- name: Verifier si un dump local existe (sur deploy-01)
+  ansible.builtin.stat:
+    path: "{{ postgres_dump_local_path }}"
+  delegate_to: localhost
+  become: false
+  register: dump_local
+  when: postgres_restore_dump | bool
+
+- name: Copier le dump SQL vers pgsql-01
+  ansible.builtin.copy:
+    src: "{{ postgres_dump_local_path }}"
+    dest: "/tmp/webapp_db.sql"
+    owner: postgres
+    group: postgres
+    mode: '0644'
+  when:
+    - postgres_restore_dump | bool
+    - dump_local.stat.exists | default(false)
+
+- name: Restaurer le dump SQL dans {{ postgres_db_name }}
+  community.postgresql.postgresql_db:
+    name: "{{ postgres_db_name }}"
+    state: restore
+    target: "/tmp/webapp_db.sql"
+  become: true
+  become_user: postgres
+  when:
+    - postgres_restore_dump | bool
+    - dump_local.stat.exists | default(false)
+
+- name: Nettoyer le dump temporaire
+  ansible.builtin.file:
+    path: "/tmp/webapp_db.sql"
+    state: absent
+  when: postgres_restore_dump | bool

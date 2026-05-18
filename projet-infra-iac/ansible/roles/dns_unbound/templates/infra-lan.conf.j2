@@ -1,0 +1,202 @@
+{# =============================================================================
+   Template Unbound - dns-01.infra.lan
+   Projet Virtualisation M1 - Datacenter Prive
+   ============================================================================= #}
+# =============================================================================
+# Configuration Unbound - dns-01.infra.lan
+# Projet Virtualisation M1 - Datacenter Prive
+# Genere par Ansible le {{ ansible_date_time.iso8601 }}
+# =============================================================================
+# Emplacement : /etc/unbound/unbound.conf.d/infra-lan.conf
+# Role        : Resolveur DNS recursif + autoritaire pour la zone infra.lan
+# IP          : 10.0.20.10/24 (VLAN 20 - CORE)
+# =============================================================================
+
+server:
+    # =========================================================================
+    # ECOUTE
+    # =========================================================================
+    interface: 0.0.0.0
+    port: 53
+
+    # =========================================================================
+    # CONTROLE D'ACCES
+    # =========================================================================
+    access-control: 127.0.0.0/8 allow
+    access-control: 10.0.0.0/8 allow
+    access-control: 192.168.0.0/16 allow
+    access-control: 0.0.0.0/0 refuse
+
+    # =========================================================================
+    # PROTOCOLES
+    # =========================================================================
+    do-ip4: yes
+    do-ip6: no
+    do-udp: yes
+    do-tcp: yes
+
+    # =========================================================================
+    # SECURITE
+    # =========================================================================
+    hide-identity: yes
+    hide-version: yes
+    harden-glue: yes
+    harden-dnssec-stripped: yes
+    harden-below-nxdomain: yes
+    harden-referral-path: yes
+    use-caps-for-id: yes
+    qname-minimisation: yes
+
+    # Anti-rebind : refuse les reponses publiques pointant vers du prive
+    private-address: 10.0.0.0/8
+    private-address: 172.16.0.0/12
+    private-address: 192.168.0.0/16
+    private-address: 169.254.0.0/16
+    # Mais autorise notre zone interne a contenir des IPs privees
+    private-domain: "infra.lan."
+
+    # =========================================================================
+    # PERFORMANCE / CACHE
+    # =========================================================================
+    num-threads: 2
+    msg-cache-size: 64m
+    rrset-cache-size: 128m
+    cache-min-ttl: 300
+    cache-max-ttl: 86400
+    prefetch: yes
+    prefetch-key: yes
+    serve-expired: yes
+    serve-expired-ttl: 3600
+
+    # =========================================================================
+    # ROOT HINTS
+    # =========================================================================
+    root-hints: "/var/lib/unbound/root.hints"
+
+    # =========================================================================
+    # LOGS
+    # =========================================================================
+    verbosity: 1
+    logfile: "/var/log/unbound/unbound.log"
+    log-queries: no
+    log-replies: no
+    log-time-ascii: yes
+
+    # =========================================================================
+    # ZONE LOCALE AUTORITATIVE : infra.lan
+    # =========================================================================
+    local-zone: "infra.lan." static
+
+    # -------------------------------------------------------------------------
+    # Hyperviseurs Proxmox (192.168.3.0/24 - reseau d'administration)
+    # -------------------------------------------------------------------------
+    local-data: "pve-01.infra.lan.       IN A 192.168.3.21"
+    local-data: "pve-02.infra.lan.       IN A 192.168.3.22"
+    local-data: "pve-03.infra.lan.       IN A 192.168.3.23"
+    local-data: "cluster.infra.lan.      IN A 192.168.3.20"
+
+    # -------------------------------------------------------------------------
+    # Pare-feu OPNsense (fw-01)
+    # -------------------------------------------------------------------------
+    local-data: "fw-01.infra.lan.        IN A 192.168.3.250"
+    local-data: "fw.infra.lan.           IN A 192.168.3.250"
+    local-data: "opnsense.infra.lan.     IN A 192.168.3.250"
+
+    # -------------------------------------------------------------------------
+    # VLAN 10 - DMZ
+    # -------------------------------------------------------------------------
+    local-data: "rproxy.infra.lan.       IN A 10.0.10.10"
+    local-data: "traefik.infra.lan.      IN A 10.0.10.10"
+
+    # -------------------------------------------------------------------------
+    # VLAN 20 - CORE (services d'infrastructure)
+    # -------------------------------------------------------------------------
+    local-data: "dns-01.infra.lan.       IN A 10.0.20.10"
+    local-data: "dns.infra.lan.          IN A 10.0.20.10"
+    local-data: "netbox.infra.lan.       IN A 10.0.20.20"
+    local-data: "ipam.infra.lan.         IN A 10.0.20.20"
+    local-data: "ldap-01.infra.lan.      IN A 10.0.20.30"
+    local-data: "ldap.infra.lan.         IN A 10.0.20.30"
+
+    # -------------------------------------------------------------------------
+    # VLAN 30 - LAN_USERS (postes administrateurs)
+    # -------------------------------------------------------------------------
+    # Pas d'adresses statiques (DHCP) - reserve pour usage futur
+
+    # -------------------------------------------------------------------------
+    # VLAN 40 - BACKEND_WEB (cluster web)
+    # -------------------------------------------------------------------------
+    local-data: "web-01.infra.lan.       IN A 10.0.40.11"
+    local-data: "web-02.infra.lan.       IN A 10.0.40.12"
+    local-data: "web-03.infra.lan.       IN A 10.0.40.13"
+    local-data: "web.infra.lan.          IN A 10.0.40.10"
+    local-data: "lb.infra.lan.           IN A 10.0.40.10"
+
+    # -------------------------------------------------------------------------
+    # VLAN 50 - BACKEND_DB (bases de donnees)
+    # -------------------------------------------------------------------------
+    local-data: "pgsql-01.infra.lan.     IN A 10.0.50.10"
+    local-data: "db.infra.lan.           IN A 10.0.50.10"
+    local-data: "postgres.infra.lan.     IN A 10.0.50.10"
+
+    # -------------------------------------------------------------------------
+    # VLAN 60 - MONITORING (supervision et logs)
+    # -------------------------------------------------------------------------
+    local-data: "prometheus.infra.lan.   IN A 10.0.60.11"
+    local-data: "grafana.infra.lan.      IN A 10.0.60.21"
+    local-data: "loki.infra.lan.         IN A 10.0.60.31"
+    local-data: "monitoring.infra.lan.   IN A 10.0.60.21"
+
+    # -------------------------------------------------------------------------
+    # VLAN 99 - BACKUP (Proxmox Backup Server)
+    # -------------------------------------------------------------------------
+    local-data: "pbs-01.infra.lan.       IN A 10.0.99.10"
+    local-data: "pbs.infra.lan.          IN A 10.0.99.10"
+    local-data: "backup.infra.lan.       IN A 10.0.99.10"
+
+    # =========================================================================
+    # REVERSE DNS (PTR) - Resolution IP -> nom
+    # =========================================================================
+
+    # --- Hyperviseurs et pare-feu (192.168.3.0/24) ---
+    local-data-ptr: "192.168.3.21        pve-01.infra.lan"
+    local-data-ptr: "192.168.3.22        pve-02.infra.lan"
+    local-data-ptr: "192.168.3.23        pve-03.infra.lan"
+    local-data-ptr: "192.168.3.20        cluster.infra.lan"
+    local-data-ptr: "192.168.3.250       fw-01.infra.lan"
+
+    # --- VLAN 10 (DMZ) ---
+    local-data-ptr: "10.0.10.10          rproxy.infra.lan"
+
+    # --- VLAN 20 (CORE) ---
+    local-data-ptr: "10.0.20.10          dns-01.infra.lan"
+    local-data-ptr: "10.0.20.20          netbox.infra.lan"
+    local-data-ptr: "10.0.20.30          ldap-01.infra.lan"
+
+    # --- VLAN 40 (BACKEND_WEB) ---
+    local-data-ptr: "10.0.40.10          web.infra.lan"
+    local-data-ptr: "10.0.40.11          web-01.infra.lan"
+    local-data-ptr: "10.0.40.12          web-02.infra.lan"
+    local-data-ptr: "10.0.40.13          web-03.infra.lan"
+
+    # --- VLAN 50 (BACKEND_DB) ---
+    local-data-ptr: "10.0.50.10          pgsql-01.infra.lan"
+
+    # --- VLAN 60 (MONITORING) ---
+    local-data-ptr: "10.0.60.11          prometheus.infra.lan"
+    local-data-ptr: "10.0.60.21          grafana.infra.lan"
+    local-data-ptr: "10.0.60.31          loki.infra.lan"
+
+    # --- VLAN 99 (BACKUP) ---
+    local-data-ptr: "10.0.99.10          pbs-01.infra.lan"
+
+
+# =============================================================================
+# FORWARD ZONE : tout ce qui n'est pas infra.lan part vers DNS publics
+# =============================================================================
+forward-zone:
+    name: "."
+    forward-addr: 1.1.1.1@53      # Cloudflare primaire
+    forward-addr: 1.0.0.1@53      # Cloudflare secondaire
+    forward-addr: 9.9.9.9@53      # Quad9 (filtrage securite)
+    forward-first: no

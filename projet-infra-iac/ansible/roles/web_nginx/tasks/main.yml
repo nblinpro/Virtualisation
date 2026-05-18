@@ -1,0 +1,86 @@
+---
+# =============================================================================
+# Role web_nginx - Installation Nginx + PHP-FPM + application webapp
+# =============================================================================
+
+- name: Installer sudo et les pre-requis
+  ansible.builtin.apt:
+    name:
+      - sudo
+      - curl
+      - ca-certificates
+    state: present
+    update_cache: true
+
+- name: Installer Nginx et PHP-FPM
+  ansible.builtin.apt:
+    name:
+      - nginx
+      - "php{{ php_version }}-fpm"
+      - "php{{ php_version }}-pgsql"
+      - "php{{ php_version }}-mbstring"
+      - "php{{ php_version }}-curl"
+    state: present
+    update_cache: true
+
+- name: Creer la racine de l'application
+  ansible.builtin.file:
+    path: "{{ app_webroot }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0755'
+
+- name: Deployer l'application PHP (index.php)
+  ansible.builtin.template:
+    src: index.php.j2
+    dest: "{{ app_webroot }}/index.php"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0644'
+
+- name: Deployer un endpoint /health pour HAProxy
+  ansible.builtin.copy:
+    dest: "{{ app_webroot }}/health.txt"
+    content: "OK\n"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0644'
+
+- name: Supprimer le site Nginx par defaut
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: restart nginx
+
+- name: Deployer la conf Nginx pour webapp
+  ansible.builtin.template:
+    src: nginx-webapp.conf.j2
+    dest: /etc/nginx/sites-available/webapp.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart nginx
+
+- name: Activer le site webapp
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/webapp.conf
+    dest: /etc/nginx/sites-enabled/webapp.conf
+    state: link
+  notify: restart nginx
+
+- name: Verifier la syntaxe Nginx
+  ansible.builtin.command: nginx -t
+  changed_when: false
+
+- name: S'assurer que PHP-FPM est demarre
+  ansible.builtin.systemd:
+    name: "php{{ php_version }}-fpm"
+    state: started
+    enabled: true
+
+- name: S'assurer que Nginx est demarre
+  ansible.builtin.systemd:
+    name: nginx
+    state: started
+    enabled: true
