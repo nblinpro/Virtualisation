@@ -3,6 +3,22 @@
 # Role web_nginx - Installation Nginx + PHP-FPM + application webapp
 # =============================================================================
 
+- name: Creer le dossier /run/php (persistence dans LXC)
+  ansible.builtin.file:
+    path: /run/php
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+
+- name: Configurer systemd-tmpfiles pour /run/php
+  ansible.builtin.copy:
+    dest: /etc/tmpfiles.d/php.conf
+    content: "d /run/php 0755 www-data www-data -\n"
+    owner: root
+    group: root
+    mode: '0644'
+
 - name: Installer sudo et les pre-requis
   ansible.builtin.apt:
     name:

@@ -31,6 +31,23 @@
     reload: true
   failed_when: false  # Echec OK si LXC interdit (on aura quand meme le service)
 
+
+- name: Creer le dossier /run/haproxy (persistence dans LXC)
+  ansible.builtin.file:
+    path: /run/haproxy
+    state: directory
+    owner: haproxy
+    group: haproxy
+    mode: '0755'
+
+- name: Configurer systemd-tmpfiles pour /run/haproxy
+  ansible.builtin.copy:
+    dest: /etc/tmpfiles.d/haproxy.conf
+    content: "d /run/haproxy 0755 haproxy haproxy -\n"
+    owner: root
+    group: root
+    mode: '0644'
+
 # =============================================================================
 # Configuration HAProxy
 # =============================================================================

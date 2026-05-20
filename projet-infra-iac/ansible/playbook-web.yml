@@ -18,6 +18,10 @@
       ansible.builtin.apt:
         update_cache: true
         cache_valid_time: 3600
+      register: apt_web_result
+      until: apt_web_result is success
+      retries: 20
+      delay: 5
 
   roles:
     - web_nginx
@@ -49,6 +53,10 @@
       ansible.builtin.apt:
         update_cache: true
         cache_valid_time: 3600
+      register: apt_lb_result
+      until: apt_lb_result is success
+      retries: 20
+      delay: 5
 
   roles:
     - lb_haproxy
