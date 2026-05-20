@@ -1,0 +1,103 @@
+---
+- name: Detecter les interfaces physiques (nic*)
+  ansible.builtin.set_fact:
+    physical_interfaces: "{{ ansible_interfaces | select('match', '^nic[0-9]+$') | list | sort }}"
+
+- name: Verifier qu'on a au moins 4 interfaces physiques
+  ansible.builtin.assert:
+    that:
+      - physical_interfaces | length >= 4
+    fail_msg: "Il faut au moins 4 interfaces physiques. Trouvees : {{ physical_interfaces }}"
+    success_msg: "Interfaces detectees : {{ physical_interfaces }}"
+
+- name: Afficher les interfaces detectees
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} : {{ physical_interfaces }}"
+
+- name: Forcer le hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Configurer /etc/hosts pour le cluster
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} ANSIBLE MANAGED - Cluster nodes"
+    block: |
+      {% for host, vars in pve_nodes.items() %}
+      {{ vars.mgmt_ip }} {{ host }} {{ host }}.infra.lan
+      {{ vars.cluster_ip }} {{ host }}-cluster
+      {% endfor %}
+
+- name: Desactiver le depot Proxmox Enterprise
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/pve-enterprise.sources
+    state: absent
+  when: pve_remove_enterprise_repo | bool
+
+- name: Desactiver le depot Ceph Enterprise
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/ceph.sources
+    state: absent
+  when: ceph_remove_enterprise_repo | bool
+
+- name: Ajouter le depot Proxmox no-subscription
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/pve-no-subscription.sources
+    content: |
+      Types: deb
+      URIs: http://download.proxmox.com/debian/pve
+      Suites: trixie
+      Components: pve-no-subscription
+      Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+    owner: root
+    group: root
+    mode: '0644'
+  when: pve_repo_no_subscription | bool
+
+- name: Mise a jour APT
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 600
+  register: apt_update
+  retries: 3
+  delay: 5
+  until: apt_update is success
+
+- name: Sauvegarder /etc/network/interfaces existant
+  ansible.builtin.copy:
+    src: /etc/network/interfaces
+    dest: /etc/network/interfaces.backup-{{ ansible_date_time.epoch }}
+    remote_src: true
+  when: not ansible_check_mode
+
+- name: Deployer la nouvelle config reseau (DHCP gardee + admin AJOUTEE)
+  ansible.builtin.template:
+    src: interfaces.j2
+    dest: /etc/network/interfaces
+    owner: root
+    group: root
+    mode: '0644'
+  register: network_config
+
+- name: Appliquer la nouvelle config reseau (ifreload -a)
+  ansible.builtin.shell: |
+    ifreload -a
+  when: network_config.changed
+  changed_when: true
+
+- name: Attendre que les interfaces remontent
+  ansible.builtin.pause:
+    seconds: 10
+  when: network_config.changed
+
+- name: Verifier les IPs apres reload
+  ansible.builtin.shell: |
+    ip -4 -br addr show
+  register: ip_status
+  changed_when: false
+
+- name: Afficher les IPs configurees
+  ansible.builtin.debug:
+    msg:
+      - "Interfaces apres reload sur {{ inventory_hostname }} :"
+      - "{{ ip_status.stdout_lines }}"

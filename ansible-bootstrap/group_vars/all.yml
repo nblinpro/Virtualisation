@@ -1,0 +1,31 @@
+---
+# =============================================================================
+# Variables globales du bootstrap Proxmox
+# =============================================================================
+
+# --- Reseaux ---
+mgmt_network: "192.168.3.0"
+mgmt_netmask: 24
+mgmt_gateway: "192.168.3.250"      # OPNsense LAN (a deployer apres)
+mgmt_dns: "1.1.1.1"                # DNS temporaire (sera 10.0.20.10 plus tard)
+
+cluster_network: "192.168.254.0"   # Reseau Corosync + Ceph
+cluster_netmask: 24
+
+# --- Cluster ---
+cluster_name: "ynov-lab"
+
+# --- Ceph ---
+ceph_release: "squid"               # Squid (19.x), recent et stable
+ceph_public_network: "{{ mgmt_network }}/{{ mgmt_netmask }}"
+ceph_cluster_network: "{{ cluster_network }}/{{ cluster_netmask }}"
+ceph_disk_path: "/dev/sdb"          # Disque dedie pour OSD (a verifier !)
+ceph_pool_name: "ceph_vm"
+ceph_pool_size: 2                   # 2 replicas pour 3 noeuds
+ceph_pool_min_size: 1               # Tolerance perte d'un noeud
+ceph_pool_pg_num: 32                # PG_num pour 3 OSDs
+
+# --- Comportement ---
+pve_repo_no_subscription: true      # Activer le depot no-subscription
+pve_remove_enterprise_repo: true    # Desactiver le depot enterprise
+ceph_remove_enterprise_repo: true   # Desactiver le depot Ceph enterprise

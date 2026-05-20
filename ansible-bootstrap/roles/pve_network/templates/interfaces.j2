@@ -1,0 +1,46 @@
+# Configuration reseau Proxmox - {{ inventory_hostname }}
+# vmbr0 = nic1 (Bridged, DHCP - Internet) - INCHANGE
+# vmbr1 = nic0 (VMnet1, IP admin static)
+# vmbr2 = nic2 (VMnet2, cluster)
+# vmbr3 = nic3 (LAN Segment, trunk VLAN)
+
+auto lo
+iface lo inet loopback
+
+{% for iface in physical_interfaces %}
+iface {{ iface }} inet manual
+{% endfor %}
+
+# vmbr0 : Internet (DHCP via box - garde l'IP actuelle)
+auto vmbr0
+iface vmbr0 inet dhcp
+    bridge-ports nic1
+    bridge-stp off
+    bridge-fd 0
+
+# vmbr1 : Management admin (VMnet1)
+auto vmbr1
+iface vmbr1 inet static
+    address {{ pve_nodes[inventory_hostname].mgmt_ip }}/{{ mgmt_netmask }}
+    bridge-ports nic0
+    bridge-stp off
+    bridge-fd 0
+
+# vmbr2 : Cluster Corosync + Ceph (VMnet2)
+auto vmbr2
+iface vmbr2 inet static
+    address {{ pve_nodes[inventory_hostname].cluster_ip }}/{{ cluster_netmask }}
+    bridge-ports nic2
+    bridge-stp off
+    bridge-fd 0
+
+# vmbr3 : Trunk VLANs (LAN Segment)
+auto vmbr3
+iface vmbr3 inet manual
+    bridge-ports nic3
+    bridge-stp off
+    bridge-fd 0
+    bridge-vlan-aware yes
+    bridge-vids 2-4094
+
+source /etc/network/interfaces.d/*

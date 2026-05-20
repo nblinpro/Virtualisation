@@ -1,0 +1,88 @@
+---
+- name: Installer python3-pexpect (necessaire pour expect)
+  ansible.builtin.apt:
+    name: python3-pexpect
+    state: present
+    update_cache: false
+
+- name: Verifier si le cluster existe deja sur ce noeud
+  ansible.builtin.command: pvecm status
+  register: cluster_check
+  failed_when: false
+  changed_when: false
+
+- name: Cluster deja en place ?
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} : Cluster {{ 'EXISTE' if cluster_check.rc == 0 else 'A CREER' }}"
+
+- name: Creer le cluster sur le noeud master
+  ansible.builtin.command: |
+    pvecm create {{ cluster_name }}
+    --link0 {{ pve_nodes[inventory_hostname].cluster_ip }}
+  when:
+    - inventory_hostname in groups['cluster_master']
+    - cluster_check.rc != 0
+  register: cluster_create
+
+- name: Attendre que le cluster soit operationnel
+  ansible.builtin.wait_for:
+    path: /etc/pve/corosync.conf
+    timeout: 30
+  when:
+    - inventory_hostname in groups['cluster_master']
+    - cluster_create.changed | default(false)
+
+- name: Verifier l'etat du cluster (master)
+  ansible.builtin.command: pvecm status
+  register: cluster_status
+  changed_when: false
+  when: inventory_hostname in groups['cluster_master']
+
+- name: Afficher l'etat du cluster
+  ansible.builtin.debug:
+    var: cluster_status.stdout_lines
+  when: inventory_hostname in groups['cluster_master']
+
+- name: Recuperer la cle SSH publique du master
+  ansible.builtin.slurp:
+    src: /etc/ssh/ssh_host_rsa_key.pub
+  register: master_key
+  delegate_to: "{{ groups['cluster_master'][0] }}"
+  when: inventory_hostname in groups['cluster_slaves']
+
+- name: Ajouter la cle SSH du master aux known_hosts des slaves
+  ansible.builtin.known_hosts:
+    name: "{{ hostvars[groups['cluster_master'][0]].pve_nodes[groups['cluster_master'][0]].mgmt_ip }}"
+    key: "{{ hostvars[groups['cluster_master'][0]].pve_nodes[groups['cluster_master'][0]].mgmt_ip }} {{ master_key.content | b64decode | trim }}"
+    state: present
+  when: inventory_hostname in groups['cluster_slaves']
+
+- name: Faire join du cluster (slaves)
+  ansible.builtin.expect:
+    command: |
+      pvecm add {{ hostvars[groups['cluster_master'][0]].pve_nodes[groups['cluster_master'][0]].mgmt_ip }} 
+      --link0 {{ pve_nodes[inventory_hostname].cluster_ip }}
+      --use_ssh
+    responses:
+      "(?i)password": "{{ pve_root_password | default('ChangeMe2026!') }}"
+    timeout: 120
+  when:
+    - inventory_hostname in groups['cluster_slaves']
+    - cluster_check.rc != 0
+  throttle: 1
+
+- name: Attendre que le cluster soit synchronise
+  ansible.builtin.pause:
+    seconds: 10
+  when: inventory_hostname in groups['cluster_slaves']
+
+- name: Verifier l'etat final du cluster
+  ansible.builtin.command: pvecm status
+  register: final_status
+  changed_when: false
+  when: inventory_hostname in groups['cluster_master']
+
+- name: Afficher l'etat final
+  ansible.builtin.debug:
+    var: final_status.stdout_lines
+  when: inventory_hostname in groups['cluster_master']

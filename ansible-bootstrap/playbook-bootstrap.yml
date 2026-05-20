@@ -1,0 +1,87 @@
+---
+# Bootstrap cluster Proxmox VE 9 + Ceph
+# Ansible reste connecte sur les IPs DHCP 192.168.1.X (pas de bascule)
+
+- name: PHASE 1 - Configuration reseau et depots
+  hosts: pve_nodes
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  roles:
+    - role: pve_network
+
+- name: PHASE 2 - Verifier les IPs
+  hosts: pve_nodes
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Verifier vmbr1 (admin)
+      ansible.builtin.shell: |
+        ip -4 addr show vmbr1 | grep -oP 'inet \K[\d.]+'
+      register: admin_ip
+      changed_when: false
+
+    - name: Verifier vmbr0 (Internet/DHCP)
+      ansible.builtin.shell: |
+        ip -4 addr show vmbr0 | grep -oP 'inet \K[\d.]+'
+      register: internet_ip
+      changed_when: false
+      failed_when: false
+
+    - name: Afficher les IPs
+      ansible.builtin.debug:
+        msg:
+          - "{{ inventory_hostname }} :"
+          - "  vmbr0 (Internet/DHCP) : {{ internet_ip.stdout | default('PAS D IP') }}"
+          - "  vmbr1 (Admin/static)  : {{ admin_ip.stdout }}"
+
+    - name: Verifier l'IP admin attendue
+      ansible.builtin.assert:
+        that:
+          - admin_ip.stdout == pve_nodes[inventory_hostname].mgmt_ip
+        fail_msg: "IP incorrecte"
+
+- name: PHASE 3 - Cluster Proxmox
+  hosts: pve_nodes
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  serial: 1
+  vars_prompt:
+    - name: pve_root_password
+      prompt: "Mot de passe root Proxmox (pour pvecm add) ?"
+      private: true
+      default: "ChangeMe2026!"
+  roles:
+    - role: pve_cluster
+
+- name: PHASE 4 - Ceph
+  hosts: pve_nodes
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  roles:
+    - role: pve_ceph
+
+- name: PHASE 5 - Resume
+  hosts: cluster_master
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Etat cluster
+      ansible.builtin.command: pvecm status
+      register: cluster_final
+      changed_when: false
+
+    - name: Etat Ceph
+      ansible.builtin.command: ceph -s
+      register: ceph_final
+      changed_when: false
+
+    - name: DEPLOIEMENT TERMINE
+      ansible.builtin.debug:
+        msg:
+          - "===== DEPLOIEMENT TERMINE ====="
+          - "{{ cluster_final.stdout_lines }}"
+          - "----"
+          - "{{ ceph_final.stdout_lines }}"

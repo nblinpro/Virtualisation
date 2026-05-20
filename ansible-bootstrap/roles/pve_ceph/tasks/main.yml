@@ -1,0 +1,173 @@
+---
+# =============================================================================
+# Role pve_ceph - Version avec retries pour MON
+# =============================================================================
+
+- name: Verifier si Ceph est deja installe
+  ansible.builtin.stat:
+    path: /etc/ceph/ceph.conf
+  register: ceph_already_installed
+
+- name: Ceph deja en place ?
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} : Ceph {{ 'DEJA INSTALLE' if ceph_already_installed.stat.exists else 'A INSTALLER' }}"
+
+- name: Ajouter le depot Ceph no-subscription
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/ceph-no-subscription.sources
+    content: |
+      Types: deb
+      URIs: http://download.proxmox.com/debian/ceph-{{ ceph_release }}
+      Suites: trixie
+      Components: no-subscription
+      Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Mise a jour APT
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 60
+
+- name: Installer Ceph
+  ansible.builtin.apt:
+    name:
+      - ceph
+      - ceph-osd
+      - ceph-mon
+      - ceph-mgr
+    state: present
+  register: ceph_install
+  retries: 3
+  delay: 10
+  until: ceph_install is success
+
+- name: Initialiser le cluster Ceph (master uniquement)
+  ansible.builtin.command: |
+    pveceph init
+    --network {{ ceph_public_network }}
+    --cluster-network {{ ceph_cluster_network }}
+  when:
+    - inventory_hostname in groups['cluster_master']
+    - not ceph_already_installed.stat.exists
+  register: ceph_init
+
+- name: Attendre que ceph.conf soit cree
+  ansible.builtin.wait_for:
+    path: /etc/pve/ceph.conf
+    timeout: 30
+  when: inventory_hostname in groups['cluster_master']
+
+- name: Attendre la propagation de la conf Ceph sur tous les noeuds
+  ansible.builtin.wait_for:
+    path: /etc/pve/ceph.conf
+    timeout: 60
+
+- name: Verifier si le monitor existe deja
+  ansible.builtin.stat:
+    path: "/var/lib/ceph/mon/ceph-{{ inventory_hostname }}"
+  register: mon_exists
+
+# --- CREATION MON avec retry et delai entre chaque ---
+- name: Creer le monitor Ceph sur ce noeud (avec retry)
+  ansible.builtin.command: |
+    pveceph mon create
+  when: not mon_exists.stat.exists
+  register: mon_create
+  retries: 5
+  delay: 15
+  until: mon_create.rc == 0
+  throttle: 1
+
+- name: Attendre que le quorum MON soit etabli
+  ansible.builtin.pause:
+    seconds: 15
+
+- name: Verifier que tous les MON sont up
+  ansible.builtin.shell: |
+    ceph mon stat 2>&1
+  register: mon_status
+  changed_when: false
+  failed_when: false
+  when: inventory_hostname in groups['cluster_master']
+
+- name: Afficher l'etat des MON
+  ansible.builtin.debug:
+    msg: "{{ mon_status.stdout_lines | default(['N/A']) }}"
+  when: inventory_hostname in groups['cluster_master']
+
+# --- CREATION DES MANAGERS ---
+- name: Verifier si le manager existe
+  ansible.builtin.stat:
+    path: "/var/lib/ceph/mgr/ceph-{{ inventory_hostname }}"
+  register: mgr_exists
+
+- name: Creer le manager Ceph
+  ansible.builtin.command: |
+    pveceph mgr create
+  when: not mgr_exists.stat.exists
+  failed_when: false
+
+# --- CREATION DES OSDS ---
+- name: Verifier que le disque OSD existe
+  ansible.builtin.stat:
+    path: "{{ ceph_disk_path }}"
+  register: osd_disk_check
+
+- name: Avertir si le disque OSD n'est pas trouve
+  ansible.builtin.fail:
+    msg: "Le disque {{ ceph_disk_path }} n'existe pas sur {{ inventory_hostname }}."
+  when: not osd_disk_check.stat.exists
+
+- name: Verifier si OSD deja cree
+  ansible.builtin.command: |
+    blkid {{ ceph_disk_path }}
+  register: osd_already_done
+  failed_when: false
+  changed_when: false
+
+- name: Creer l'OSD Ceph
+  ansible.builtin.command: |
+    pveceph osd create {{ ceph_disk_path }}
+  when: osd_already_done.rc != 0
+  throttle: 1
+  register: osd_create
+  retries: 3
+  delay: 10
+  until: osd_create.rc == 0
+
+- name: Attendre que les OSDs montent
+  ansible.builtin.pause:
+    seconds: 20
+
+# --- CREATION DU POOL ---
+- name: Verifier si le pool existe
+  ansible.builtin.shell: |
+    ceph osd pool ls | grep -w "{{ ceph_pool_name }}"
+  register: pool_check
+  failed_when: false
+  changed_when: false
+  when: inventory_hostname in groups['cluster_master']
+
+- name: Creer le pool RBD
+  ansible.builtin.command: |
+    pveceph pool create {{ ceph_pool_name }}
+    --size {{ ceph_pool_size }}
+    --min_size {{ ceph_pool_min_size }}
+    --pg_num {{ ceph_pool_pg_num }}
+    --add_storages
+  when:
+    - inventory_hostname in groups['cluster_master']
+    - pool_check.rc != 0
+
+- name: Afficher l'etat final de Ceph
+  ansible.builtin.command: ceph -s
+  register: ceph_status
+  changed_when: false
+  when: inventory_hostname in groups['cluster_master']
+
+- name: Etat final de Ceph
+  ansible.builtin.debug:
+    var: ceph_status.stdout_lines
+  when: inventory_hostname in groups['cluster_master']
