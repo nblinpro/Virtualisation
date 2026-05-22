@@ -1,0 +1,34 @@
+---
+# =============================================================================
+# Variables pour le deploiement de la VM OPNsense (VM 100)
+# =============================================================================
+
+# --- VM Proxmox ---
+vm_id: 100
+vm_name: "fw-01"
+vm_description: "OPNsense Firewall - infra.lan"
+vm_memory: 2048              # 2 Go RAM
+vm_cores: 2
+vm_disk_size: 16             # 16 Go pour le disque systeme
+vm_storage: "ceph_vm"        # Stockage Ceph (pour la HA)
+vm_iso_storage: "local"      # Stockage local pve-01 pour l'ISO
+
+# --- ISO OPNsense ---
+opnsense_version: "25.7"
+opnsense_iso_filename: "OPNsense-{{ opnsense_version }}-dvd-amd64.iso"
+opnsense_iso_url: "https://mirror.ams1.nl.leaseweb.net/opnsense/releases/{{ opnsense_version }}/{{ opnsense_iso_filename }}.bz2"
+opnsense_iso_path: "/var/lib/vz/template/iso/{{ opnsense_iso_filename }}"
+
+# --- Reseaux Proxmox (bridges) ---
+bridge_wan: "vmbr0"          # WAN OPNsense (NAT VMware ou Bridged)
+bridge_lan: "vmbr1"          # LAN admin (192.168.3.0/24)
+bridge_trunk: "vmbr3"        # Trunk VLAN-aware (pour OPT1)
+
+# --- IPs cibles d'OPNsense apres restore XML ---
+opnsense_lan_ip: "192.168.3.250"
+opnsense_default_password: "opnsense"
+opnsense_admin_user: "root"
+
+# --- XML de restoration ---
+opnsense_xml_local: "opnsense-config.xml"          # Fichier dans files/
+opnsense_xml_remote: "/root/opnsense-config.xml"   # Destination sur pve-01

@@ -1,0 +1,201 @@
+---
+# =============================================================================
+# Role opnsense_vm
+# Telecharge l'ISO OPNsense et cree la VM 100 sur pve-01
+# =============================================================================
+
+# --- Verifier si la VM existe deja ---
+- name: Verifier si la VM {{ vm_id }} existe deja
+  ansible.builtin.command: |
+    qm status {{ vm_id }}
+  register: vm_exists
+  failed_when: false
+  changed_when: false
+
+- name: Etat de la VM {{ vm_id }}
+  ansible.builtin.debug:
+    msg: "VM {{ vm_id }} : {{ 'EXISTE DEJA (' + (vm_exists.stdout | default('')) + ')' if vm_exists.rc == 0 else 'A CREER' }}"
+
+# --- Verifier la connectivite Internet sur pve-01 ---
+- name: Verifier qu'Internet est accessible (pour telecharger l'ISO)
+  ansible.builtin.command: |
+    ping -c 2 -W 3 8.8.8.8
+  register: internet_check
+  failed_when: false
+  changed_when: false
+  when: vm_exists.rc != 0
+
+- name: Echec si pas d'Internet
+  ansible.builtin.fail:
+    msg: |
+      Pas d'acces Internet sur pve-01.
+      Verifier que vmbr0 a une IP DHCP valide via :
+        ip -4 addr show vmbr0
+        ping -c 2 8.8.8.8
+  when:
+    - vm_exists.rc != 0
+    - internet_check.rc != 0
+
+# --- Telecharger et decompresser l'ISO OPNsense ---
+- name: Verifier si l'ISO OPNsense est deja telechargee
+  ansible.builtin.stat:
+    path: "{{ opnsense_iso_path }}"
+  register: iso_stat
+
+- name: Telecharger l'ISO OPNsense compresse (peut prendre 2-5 min)
+  ansible.builtin.get_url:
+    url: "{{ opnsense_iso_url }}"
+    dest: "{{ opnsense_iso_path }}.bz2"
+    mode: '0644'
+    timeout: 600
+  when: not iso_stat.stat.exists
+  register: iso_download
+
+- name: Decompresser l'ISO (bzip2)
+  ansible.builtin.command: |
+    bzip2 -d "{{ opnsense_iso_path }}.bz2"
+  args:
+    creates: "{{ opnsense_iso_path }}"
+  when: iso_download.changed | default(false)
+
+- name: Verifier que l'ISO est presente
+  ansible.builtin.stat:
+    path: "{{ opnsense_iso_path }}"
+  register: iso_final
+
+- name: ISO OPNsense disponible
+  ansible.builtin.debug:
+    msg: >
+      ISO {{ opnsense_iso_filename }} : {{ 'OK (' + (iso_final.stat.size / 1024 / 1024) | round(0) | string + ' Mo)' if iso_final.stat.exists else 'INTROUVABLE' }}
+
+- name: Echec si ISO manquante
+  ansible.builtin.fail:
+    msg: "L'ISO OPNsense n'a pas pu etre telechargee."
+  when: not iso_final.stat.exists
+
+# --- Verifier que les bridges existent ---
+- name: Verifier que les bridges Proxmox existent
+  ansible.builtin.shell: |
+    ip link show {{ item }} 2>&1 | head -1
+  register: bridge_check
+  failed_when: "'does not exist' in bridge_check.stdout"
+  changed_when: false
+  loop:
+    - "{{ bridge_wan }}"
+    - "{{ bridge_lan }}"
+    - "{{ bridge_trunk }}"
+
+# --- Verifier que le storage Ceph existe ---
+- name: Verifier que le storage {{ vm_storage }} existe
+  ansible.builtin.shell: |
+    pvesm status | grep -w {{ vm_storage }}
+  register: storage_check
+  failed_when: storage_check.rc != 0
+  changed_when: false
+
+- name: Storage Ceph OK
+  ansible.builtin.debug:
+    msg: "Storage {{ vm_storage }} : {{ storage_check.stdout }}"
+
+# --- Creer la VM OPNsense ---
+- name: Creer la VM {{ vm_id }} ({{ vm_name }})
+  ansible.builtin.command: >
+    qm create {{ vm_id }}
+    --name {{ vm_name }}
+    --description "{{ vm_description }}"
+    --memory {{ vm_memory }}
+    --cores {{ vm_cores }}
+    --cpu host
+    --machine q35
+    --bios ovmf
+    --efidisk0 {{ vm_storage }}:1,efitype=4m,format=raw
+    --scsihw virtio-scsi-single
+    --scsi0 {{ vm_storage }}:{{ vm_disk_size }},format=raw,iothread=1
+    --ide2 {{ vm_iso_storage }}:iso/{{ opnsense_iso_filename }},media=cdrom
+    --boot order=ide2;scsi0
+    --net0 virtio,bridge={{ bridge_wan }},firewall=0
+    --net1 virtio,bridge={{ bridge_lan }},firewall=0
+    --net2 virtio,bridge={{ bridge_trunk }},firewall=0
+    --onboot 1
+    --ostype other
+    --serial0 socket
+    --vga serial0
+    --tags opnsense,firewall
+  when: vm_exists.rc != 0
+  register: vm_create
+
+- name: Confirmer la creation
+  ansible.builtin.debug:
+    msg: "VM {{ vm_id }} ({{ vm_name }}) creee avec succes"
+  when: vm_create.changed | default(false)
+
+# --- Recuperer les MAC des interfaces (pour le XML) ---
+- name: Recuperer les MACs des interfaces de la VM
+  ansible.builtin.shell: |
+    qm config {{ vm_id }} | grep -E '^net[0-9]+' | sort
+  register: vm_macs
+  changed_when: false
+
+- name: MACs des interfaces de la VM OPNsense
+  ansible.builtin.debug:
+    msg: "{{ vm_macs.stdout_lines }}"
+
+# --- Demarrer la VM ---
+- name: Verifier l'etat de la VM
+  ansible.builtin.command: |
+    qm status {{ vm_id }}
+  register: vm_status
+  changed_when: false
+
+- name: Demarrer la VM {{ vm_id }} si pas deja running
+  ansible.builtin.command: |
+    qm start {{ vm_id }}
+  when: "'running' not in vm_status.stdout"
+  register: vm_start
+
+- name: Attendre que la VM soit "running"
+  ansible.builtin.shell: |
+    qm status {{ vm_id }}
+  register: vm_running
+  retries: 10
+  delay: 3
+  until: "'running' in vm_running.stdout"
+  changed_when: false
+
+- name: VM OPNsense en cours d'execution
+  ansible.builtin.debug:
+    msg: "VM {{ vm_id }} ({{ vm_name }}) : {{ vm_running.stdout }}"
+
+# --- Instructions de la suite ---
+- name: INSTRUCTIONS - Etapes manuelles a faire ensuite
+  ansible.builtin.debug:
+    msg:
+      - "=========================================="
+      - "VM {{ vm_id }} OPNsense creee et demarree"
+      - "=========================================="
+      - ""
+      - "Acces a la console pour installer OPNsense :"
+      - ""
+      - "  Option A - Web UI Proxmox :"
+      - "    https://192.168.80.X:8006 (ou IP WAN actuelle de pve-01)"
+      - "    -> Datacenter -> pve-01 -> {{ vm_id }} ({{ vm_name }}) -> Console"
+      - ""
+      - "  Option B - Console serie SSH (plus rapide) :"
+      - "    ssh -i ~/.ssh/proxmox_lab root@192.168.3.21"
+      - "    qm terminal {{ vm_id }}"
+      - "    (sortir avec Ctrl+O suivi de Enter)"
+      - ""
+      - "Procedure d'installation OPNsense :"
+      - "  1. Au prompt 'login:' tapez 'installer'"
+      - "  2. Mot de passe : 'opnsense'"
+      - "  3. Choisir keymap : 'fr-oss' ou ce qui convient"
+      - "  4. Choisir 'Install (UFS)' (plus simple)"
+      - "  5. Selectionner le disque (un seul disponible : scsi0 16G)"
+      - "  6. Confirmer l'installation - patienter ~3-5 min"
+      - "  7. Reboot - retirer l'ISO via :"
+      - "       qm set {{ vm_id }} --delete ide2"
+      - "  8. Apres reboot, login : root / opnsense"
+      - ""
+      - "Etape suivante (apres installation) :"
+      - "  ansible-playbook playbook-opnsense.yml --tags restore"
+      - "=========================================="

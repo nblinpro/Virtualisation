@@ -1,0 +1,43 @@
+---
+# =============================================================================
+# Playbook : Deploiement automatise de la VM OPNsense (fw-01)
+# =============================================================================
+#
+# WORKFLOW :
+#
+#   Phase 1 (automatique) : Creation de la VM 100
+#     ansible-playbook playbook-opnsense.yml --tags vm
+#
+#   Phase manuelle : Installation OPNsense via console
+#     ssh root@192.168.3.21 'qm terminal 100'
+#     Suivre le wizard d'installation (~5 min)
+#
+#   Phase 2 (automatique) : Restore du XML
+#     ansible-playbook playbook-opnsense.yml --tags restore
+#
+# =============================================================================
+# PRE-REQUIS :
+#   - Cluster Proxmox + Ceph deja deploye (playbook bootstrap)
+#   - Pool ceph_vm operationnel
+#   - Bridges vmbr0, vmbr1, vmbr3 configures
+#   - pve-01 a Internet (pour telecharger l'ISO)
+#   - SSH key proxmox_lab deja deployee sur pve-01
+# =============================================================================
+
+- name: PHASE 1 - Creation de la VM OPNsense
+  hosts: pve_master
+  become: true
+  gather_facts: true
+  tags:
+    - vm
+  roles:
+    - role: opnsense_vm
+
+- name: PHASE 2 - Restoration du XML OPNsense
+  hosts: pve_master
+  become: true
+  gather_facts: true
+  tags:
+    - restore
+  roles:
+    - role: opnsense_restore

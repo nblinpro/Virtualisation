@@ -1,0 +1,84 @@
+---
+# =============================================================================
+# Role opnsense_restore
+# Copie le XML de configuration sur pve-01 et fournit la procedure de restore
+# =============================================================================
+
+# --- Verifier que la VM OPNsense est demarree ---
+- name: Verifier que la VM {{ vm_id }} est demarree
+  ansible.builtin.command: |
+    qm status {{ vm_id }}
+  register: vm_status
+  failed_when: "'running' not in vm_status.stdout"
+  changed_when: false
+
+# --- Copier le XML sur pve-01 ---
+- name: Copier le XML de configuration sur pve-01
+  ansible.builtin.copy:
+    src: "{{ opnsense_xml_local }}"
+    dest: "{{ opnsense_xml_remote }}"
+    mode: '0600'
+
+- name: XML disponible sur pve-01
+  ansible.builtin.debug:
+    msg: "XML copie sur pve-01:{{ opnsense_xml_remote }}"
+
+# --- Tester si OPNsense LAN repond deja (signe que l'install + setup initial sont faits) ---
+- name: Tester si OPNsense LAN repond (apres install)
+  ansible.builtin.wait_for:
+    host: "{{ opnsense_lan_ip }}"
+    port: 443
+    timeout: 5
+  register: opnsense_lan_check
+  failed_when: false
+
+# --- Instructions de restore ---
+- name: PROCEDURE DE RESTORE
+  ansible.builtin.debug:
+    msg:
+      - "============================================================="
+      - "OPNsense joignable sur {{ opnsense_lan_ip }} : {{ 'OUI' if opnsense_lan_check.failed | bool == false else 'NON (installation pas finie ?)' }}"
+      - "============================================================="
+      - ""
+      - "Pour restorer le XML, 2 methodes :"
+      - ""
+      - "=== METHODE 1 - Via l'interface web (recommandee) ==="
+      - "  1. Ouvrir https://{{ opnsense_lan_ip }} dans Firefox"
+      - "     (depuis Windows, ajouter route si necessaire :"
+      - "      route -p add 192.168.3.0 mask 255.255.255.0 <IP_WAN_pve-01>)"
+      - "  2. Login : root / opnsense"
+      - "  3. System -> Configuration -> Backups"
+      - "  4. Section 'Restore Backup' :"
+      - "     - Restore area : ALL"
+      - "     - Configuration file : selectionner le fichier local"
+      - "       (telecharger d'abord {{ opnsense_xml_remote }} via SCP)"
+      - "     - 'Open' puis 'Restore configuration'"
+      - "  5. OPNsense va REBOOTER automatiquement"
+      - "  6. Apres reboot, IP LAN = {{ opnsense_lan_ip }}"
+      - ""
+      - "=== METHODE 2 - Via SCP direct (rapide) ==="
+      - "  Depuis pve-01 :"
+      - "    scp {{ opnsense_xml_remote }} root@{{ opnsense_lan_ip }}:/conf/config.xml"
+      - "  Puis sur OPNsense (via console serie ou SSH) :"
+      - "    /usr/local/etc/rc.reload_all"
+      - "    reboot"
+      - ""
+      - "Apres restore, l'OPNsense aura :"
+      - "  - 47 regles de pare-feu"
+      - "  - 14 alias"
+      - "  - 7 VLANs (DMZ, CORE, LAN_USERS, BACKEND_WEB, BACKEND_DB, MONITORING, BACKUP)"
+      - "  - DHCP Kea configure"
+      - "  - DNS interne sur 10.0.20.10"
+      - "============================================================="
+
+# --- Optionnel : copier le XML aussi sur deploy-01 pour facilite l'upload web ---
+- name: Telecharger le XML sur le runner Ansible (pour upload web facile)
+  ansible.builtin.fetch:
+    src: "{{ opnsense_xml_remote }}"
+    dest: "/tmp/opnsense-config-{{ ansible_date_time.epoch }}.xml"
+    flat: true
+  register: xml_local_copy
+
+- name: XML disponible localement pour upload via web
+  ansible.builtin.debug:
+    msg: "XML telecharge localement : {{ xml_local_copy.dest }}"
