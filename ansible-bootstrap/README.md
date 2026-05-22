@@ -71,15 +71,15 @@ nano inventory.ini
 Adapter les `ansible_host` selon les IPs DHCP attribuees par ta box :
 
 ```ini
-pve-01 ansible_host=192.168.1.69 node_id=1
-pve-02 ansible_host=192.168.1.151 node_id=2
-pve-03 ansible_host=192.168.1.38 node_id=3
+pve-01 ansible_host=192.168.80.133 node_id=1
+pve-02 ansible_host=192.168.80.134 node_id=2
+pve-03 ansible_host=192.168.80.135 node_id=3
 ```
 
 ### Etape 2 : Deployer la cle SSH
 
 ```bash
-for ip in 192.168.1.69 192.168.1.151 192.168.1.38; do
+for ip in 192.168.80.133 192.168.80.134 192.168.80.135; do
     echo "=== $ip ==="
     ssh-copy-id -i ~/.ssh/proxmox_lab.pub root@$ip
 done
