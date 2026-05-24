@@ -79,9 +79,10 @@ pve-03 ansible_host=192.168.80.135 node_id=3
 ### Etape 2 : Deployer la cle SSH
 
 ```bash
-for ip in 192.168.80.133 192.168.80.134 192.168.80.135; do
+
+for ip in 192.168.1.69 192.168.1.151 192.168.1.38; do
     echo "=== $ip ==="
-    ssh-copy-id -i ~/.ssh/proxmox_lab.pub root@$ip
+    ssh-copy-id -o StrictHostKeyChecking=no -i ~/.ssh/proxmox_lab.pub root@$ip
 done
 ```
 
@@ -97,6 +98,7 @@ Tu dois avoir 3 SUCCESS.
 ### Etape 4 : Lancer le bootstrap
 
 ```bash
+ansible-playbook playbook-bootstrap.yml --tags phase1
 ansible-playbook playbook-bootstrap.yml
 ```
 

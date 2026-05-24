@@ -14,7 +14,7 @@ vm_storage: "ceph_vm"        # Stockage Ceph (pour la HA)
 vm_iso_storage: "local"      # Stockage local pve-01 pour l'ISO
 
 # --- ISO OPNsense ---
-opnsense_version: "25.7"
+opnsense_version: "26.1"
 opnsense_iso_filename: "OPNsense-{{ opnsense_version }}-dvd-amd64.iso"
 opnsense_iso_url: "https://mirror.ams1.nl.leaseweb.net/opnsense/releases/{{ opnsense_version }}/{{ opnsense_iso_filename }}.bz2"
 opnsense_iso_path: "/var/lib/vz/template/iso/{{ opnsense_iso_filename }}"

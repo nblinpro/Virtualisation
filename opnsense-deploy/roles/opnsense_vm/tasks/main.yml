@@ -118,8 +118,7 @@
     --net2 virtio,bridge={{ bridge_trunk }},firewall=0
     --onboot 1
     --ostype other
-    --serial0 socket
-    --vga serial0
+    --vga std
     --tags opnsense,firewall
   when: vm_exists.rc != 0
   register: vm_create
