@@ -1,4 +1,12 @@
 ---
+# =============================================================================
+# Role pve_cluster - Version corrigee
+# - Utilise l'IP du reseau cluster (192.168.254.x)
+# - Recupere le fingerprint SSL du master
+# - Repond au prompt SSH "yes/no"
+# - Verifie que le join a vraiment reussi
+# =============================================================================
+
 - name: Installer python3-pexpect (necessaire pour expect)
   ansible.builtin.apt:
     name: python3-pexpect
@@ -15,6 +23,7 @@
   ansible.builtin.debug:
     msg: "{{ inventory_hostname }} : Cluster {{ 'EXISTE' if cluster_check.rc == 0 else 'A CREER' }}"
 
+# --- MASTER : creer le cluster ---
 - name: Creer le cluster sur le noeud master
   ansible.builtin.command: |
     pvecm create {{ cluster_name }}
@@ -36,6 +45,9 @@
   ansible.builtin.command: pvecm status
   register: cluster_status
   changed_when: false
+  retries: 6
+  delay: 10
+  until: cluster_status.rc == 0
   when: inventory_hostname in groups['cluster_master']
 
 - name: Afficher l'etat du cluster
@@ -43,6 +55,43 @@
     var: cluster_status.stdout_lines
   when: inventory_hostname in groups['cluster_master']
 
+# --- SLAVES : recuperer le fingerprint SSL du master ---
+- name: Recuperer le fingerprint SSL du master
+  ansible.builtin.shell: |
+    openssl x509 -in /etc/pve/pve-ssl.pem -noout -fingerprint -sha256 | awk -F '=' '{print $2}'
+  delegate_to: "{{ groups['cluster_master'][0] }}"
+  register: master_fingerprint
+  changed_when: false
+  when: inventory_hostname in groups['cluster_slaves']
+
+- name: Afficher le fingerprint recupere
+  ansible.builtin.debug:
+    msg: "Fingerprint master : {{ master_fingerprint.stdout }}"
+  when: inventory_hostname in groups['cluster_slaves']
+
+# --- MASTER : generer cle SSH root si absente et la distribuer aux slaves ---
+- name: Generer la cle SSH root du master si absente
+  ansible.builtin.command: ssh-keygen -t ed25519 -N '' -f /root/.ssh/id_ed25519
+  args:
+    creates: /root/.ssh/id_ed25519
+  delegate_to: "{{ groups['cluster_master'][0] }}"
+  run_once: true
+
+- name: Recuperer la cle SSH root du master
+  ansible.builtin.slurp:
+    src: /root/.ssh/id_ed25519.pub
+  register: master_root_pubkey
+  delegate_to: "{{ groups['cluster_master'][0] }}"
+  run_once: true
+
+- name: Autoriser le master a se connecter en root sur les slaves (necessaire pour pvecm add)
+  ansible.posix.authorized_key:
+    user: root
+    key: "{{ hostvars[groups['cluster_master'][0]]['master_root_pubkey']['content'] | b64decode | trim }}"
+    state: present
+  when: inventory_hostname in groups['cluster_slaves']
+
+# --- SLAVES : transferer la cle SSH host du master ---
 - name: Recuperer la cle SSH publique du master
   ansible.builtin.slurp:
     src: /etc/ssh/ssh_host_rsa_key.pub
@@ -52,31 +101,54 @@
 
 - name: Ajouter la cle SSH du master aux known_hosts des slaves
   ansible.builtin.known_hosts:
-    name: "{{ hostvars[groups['cluster_master'][0]].pve_nodes[groups['cluster_master'][0]].mgmt_ip }}"
-    key: "{{ hostvars[groups['cluster_master'][0]].pve_nodes[groups['cluster_master'][0]].mgmt_ip }} {{ master_key.content | b64decode | trim }}"
+    name: "{{ hostvars[groups['cluster_master'][0]].pve_nodes[groups['cluster_master'][0]].cluster_ip }}"
+    key: "{{ hostvars[groups['cluster_master'][0]].pve_nodes[groups['cluster_master'][0]].cluster_ip }} {{ master_key.content | b64decode | trim }}"
     state: present
   when: inventory_hostname in groups['cluster_slaves']
 
+# Ajouter les slaves aux known_hosts du master (reverse SSH pour pvecm add)
+- name: Ajouter le slave aux known_hosts du master
+  ansible.builtin.shell: |
+    ssh-keyscan -H {{ pve_nodes[inventory_hostname].cluster_ip }} >> /root/.ssh/known_hosts
+  delegate_to: "{{ groups['cluster_master'][0] }}"
+  changed_when: true
+  when: inventory_hostname in groups['cluster_slaves']
+
+# --- SLAVES : faire join du cluster ---
 - name: Faire join du cluster (slaves)
   ansible.builtin.expect:
-    command: |
-      pvecm add {{ hostvars[groups['cluster_master'][0]].pve_nodes[groups['cluster_master'][0]].mgmt_ip }} 
+    command: >
+      pvecm add {{ hostvars[groups['cluster_master'][0]].pve_nodes[groups['cluster_master'][0]].cluster_ip }}
       --link0 {{ pve_nodes[inventory_hostname].cluster_ip }}
+      {% if master_fingerprint.stdout | default('') %}--fingerprint {{ master_fingerprint.stdout }}{% endif %}
       --use_ssh
     responses:
       "(?i)password": "{{ pve_root_password | default('ChangeMe2026!') }}"
-    timeout: 120
+      "(?i)Are you sure you want to continue connecting": "yes"
+    timeout: 180
   when:
     - inventory_hostname in groups['cluster_slaves']
     - cluster_check.rc != 0
   throttle: 1
+  register: cluster_join
 
 - name: Attendre que le cluster soit synchronise
   ansible.builtin.pause:
-    seconds: 10
+    seconds: 30
   when: inventory_hostname in groups['cluster_slaves']
 
-- name: Verifier l'etat final du cluster
+# --- VERIFICATION POST-JOIN ---
+- name: Verifier que le slave est bien dans le cluster
+  ansible.builtin.command: pvecm status
+  register: cluster_check_after
+  failed_when: cluster_check_after.rc != 0
+  changed_when: false
+  retries: 6
+  delay: 10
+  until: cluster_check_after.rc == 0
+  when: inventory_hostname in groups['cluster_slaves']
+
+- name: Verifier l'etat final du cluster (master)
   ansible.builtin.command: pvecm status
   register: final_status
   changed_when: false

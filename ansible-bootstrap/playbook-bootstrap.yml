@@ -1,12 +1,13 @@
 ---
 # Bootstrap cluster Proxmox VE 9 + Ceph
-# Ansible reste connecte sur les IPs DHCP 192.168.1.X (pas de bascule)
+# Cluster cree manuellement avant de lancer ce playbook
 
 - name: PHASE 1 - Configuration reseau et depots
   hosts: pve_nodes
   become: true
   gather_facts: true
   any_errors_fatal: true
+  tags: [phase1]
   roles:
     - role: pve_network
 
@@ -14,6 +15,7 @@
   hosts: pve_nodes
   become: true
   gather_facts: false
+  tags: [phase2]
   tasks:
     - name: Verifier vmbr1 (admin)
       ansible.builtin.shell: |
@@ -41,25 +43,28 @@
           - admin_ip.stdout == pve_nodes[inventory_hostname].mgmt_ip
         fail_msg: "IP incorrecte"
 
-- name: PHASE 3 - Cluster Proxmox
-  hosts: pve_nodes
+- name: PHASE 3 - Verifier que le cluster est en place (cree manuellement)
+  hosts: cluster_master
   become: true
-  gather_facts: true
-  any_errors_fatal: true
-  serial: 1
-  vars_prompt:
-    - name: pve_root_password
-      prompt: "Mot de passe root Proxmox (pour pvecm add) ?"
-      private: true
-      default: "ChangeMe2026!"
-  roles:
-    - role: pve_cluster
+  gather_facts: false
+  tags: [phase3]
+  tasks:
+    - name: Verifier que le cluster existe
+      ansible.builtin.command: pvecm status
+      register: cluster_check
+      changed_when: false
+      failed_when: cluster_check.rc != 0
+
+    - name: Afficher l'etat du cluster
+      ansible.builtin.debug:
+        var: cluster_check.stdout_lines
 
 - name: PHASE 4 - Ceph
   hosts: pve_nodes
   become: true
   gather_facts: true
   any_errors_fatal: true
+  tags: [phase4]
   roles:
     - role: pve_ceph
 
@@ -67,6 +72,7 @@
   hosts: cluster_master
   become: true
   gather_facts: false
+  tags: [phase5]
   tasks:
     - name: Etat cluster
       ansible.builtin.command: pvecm status
