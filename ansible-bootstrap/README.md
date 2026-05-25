@@ -79,8 +79,9 @@ pve-03 ansible_host=192.168.80.135 node_id=3
 ### Etape 2 : Deployer la cle SSH
 
 ```bash
+ssh-keygen -t ed25519 -f ~/.ssh/proxmox_lab -C "proxmox_lab_key"
 
-for ip in 192.168.1.69 192.168.1.151 192.168.1.38; do
+for ip in 192.168.80.159 192.168.80.160 192.168.80.161; do
     echo "=== $ip ==="
     ssh-copy-id -o StrictHostKeyChecking=no -i ~/.ssh/proxmox_lab.pub root@$ip
 done
