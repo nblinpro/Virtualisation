@@ -96,7 +96,7 @@ server:
     local-data: "cluster.infra.lan.      IN A 192.168.3.20"
 
     # -------------------------------------------------------------------------
-    # Pare-feu OPNsense
+    # Pare-feu OPNsense (fw-01)
     # -------------------------------------------------------------------------
     local-data: "fw-01.infra.lan.        IN A 192.168.3.250"
     local-data: "fw.infra.lan.           IN A 192.168.3.250"
@@ -142,10 +142,10 @@ server:
     # -------------------------------------------------------------------------
     # VLAN 60 - MONITORING (supervision et logs)
     # -------------------------------------------------------------------------
-    local-data: "victoriametrics.infra.lan. IN A 10.0.60.11"
-    local-data: "grafana.infra.lan.         IN A 10.0.60.21"
-    local-data: "victorialogs.infra.lan.    IN A 10.0.60.31"
-    local-data: "monitoring.infra.lan.      IN A 10.0.60.21"
+    local-data: "prometheus.infra.lan.   IN A 10.0.60.11"
+    local-data: "grafana.infra.lan.      IN A 10.0.60.21"
+    local-data: "loki.infra.lan.         IN A 10.0.60.31"
+    local-data: "monitoring.infra.lan.   IN A 10.0.60.21"
 
     # -------------------------------------------------------------------------
     # VLAN 99 - BACKUP (Proxmox Backup Server)
@@ -183,12 +183,13 @@ server:
     local-data-ptr: "10.0.50.10          pgsql-01.infra.lan"
 
     # --- VLAN 60 (MONITORING) ---
-    local-data-ptr: "10.0.60.11          victoriametrics.infra.lan"
+    local-data-ptr: "10.0.60.11          prometheus.infra.lan"
     local-data-ptr: "10.0.60.21          grafana.infra.lan"
-    local-data-ptr: "10.0.60.31          victorialogs.infra.lan"
+    local-data-ptr: "10.0.60.31          loki.infra.lan"
 
     # --- VLAN 99 (BACKUP) ---
     local-data-ptr: "10.0.99.10          pbs-01.infra.lan"
+
 
 # =============================================================================
 # FORWARD ZONE : tout ce qui n'est pas infra.lan part vers DNS publics
