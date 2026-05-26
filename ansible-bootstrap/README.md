@@ -45,14 +45,35 @@ Ce projet automatise le bootstrap complet d'un cluster Proxmox VE 9 avec stockag
      - Adapter 3 : **VMnet2** (host-only 192.168.254.0/24)
      - Adapter 4 : **LAN Segment "lab-trunk"** (pour trunk VLANs)
    - 2 disques :
-     - Disque 1 : 40 Go (systeme Proxmox)
+     - Disque 1 : 20 Go (systeme Proxmox)
      - Disque 2 : 30+ Go (pour Ceph OSD)
 3. **IP DHCP du LAN domestique attribuee** (l'Adapter 2 Bridged donne cette IP)
 4. **Cle SSH deployee** depuis l'hote qui va lancer Ansible
 
 ### Sur la machine qui lance Ansible
 
-La machine doit avoir acces aux PVE via leur IP DHCP (192.168.1.X).
+1. Installer les autres paquets et les prérequis
+On installe ansible, les outils SSH, ainsi que wget et unzip pour récupérer Terraform :
+apk add ansible openssh sshpass wget unzip
+
+3. Télécharger et installer le binaire Terraform
+On va récupérer une version stable (la 1.8.3 par exemple, parfaitement compatible avec le provider Proxmox) pour l'architecture standard (amd64) :
+# Téléchargement de l'archive
+wget https://releases.hashicorp.com/terraform/1.8.3/terraform_1.8.3_linux_amd64.zip
+
+# Extraction du binaire
+unzip terraform_1.8.3_linux_amd64.zip
+
+# Déplacement dans le PATH pour qu'il soit exécutable de partout
+mv terraform /usr/local/bin/
+
+# Nettoyage de l'archive
+rm terraform_1.8.3_linux_amd64.zip
+
+3. Vérification
+Tu peux maintenant relancer tes vérifications :
+terraform version
+ansible --version
 
 **Si tu lances depuis deploy-01** (qui est sur VMnet1), tu dois lui donner acces a 192.168.1.0/24 :
 - Ajouter un Network Adapter Bridged a la VM deploy-01 dans VMware
@@ -79,6 +100,9 @@ pve-03 ansible_host=192.168.80.135 node_id=3
 ### Etape 2 : Deployer la cle SSH
 
 ```bash
+ssh-keygen -t ed25519 -C "admin@nicolas.cloud" -N "" -f ~/.ssh/id_ed25519
+ssh-copy-id root@IP_proxmox
+
 ssh-keygen -t ed25519 -f ~/.ssh/proxmox_lab -C "proxmox_lab_key"
 
 for ip in 192.168.80.159 192.168.80.160 192.168.80.161; do
