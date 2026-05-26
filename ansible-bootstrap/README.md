@@ -207,5 +207,10 @@ Une fois le bootstrap termine :
 ## Anecdote pour le rapport
 
 Ce playbook represente une **automatisation IaC complete** de la couche hyperviseur. Avant ce script, le bootstrap manuel d'un cluster Proxmox + Ceph prenait **2 heures** (clics dans l'interface web, mots de passe a taper, attente entre etapes). Avec ce playbook, le meme deploiement prend **30 minutes** et est **100% reproductible**.
+cd /var/lib/vz/template/iso
+wget https://mirror.ams1.nl.leaseweb.net/opnsense/releases/26.1/OPNsense-26.1-dvd-amd64.iso.bz2
+bunzip2 OPNsense-26.1-dvd-amd64.iso.bz2
+ls -la OPNsense*
+
 
 C'est la difference fondamentale entre l'**administration traditionnelle** (clic-clic-clic) et l'**Infrastructure as Code** (un fichier Yaml, une commande).
