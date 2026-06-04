@@ -18,16 +18,20 @@ Déploiement automatisé de **dns-01** (résolveur DNS interne Unbound) via :
 ### Sur deploy-01 (bastion)
 
 ```bash
-# Terraform
-sudo apt update
-sudo apt install -y wget gnupg software-properties-common
-wget -O - https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
-echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
-sudo apt update
-sudo apt install -y terraform
+Sur deploy-bastion (CT alpine)
 
-# Ansible
-sudo apt install -y ansible
+# Activer le dépôt community (nécessaire pour Ansible)
+sed -i '/community/s/^#//g' /etc/apk/repositories
+apk update
+
+# Installer les prérequis et Ansible
+apk add wget unzip ansible
+
+# Installer Terraform manuellement
+wget https://releases.hashicorp.com/terraform/1.9.0/terraform_1.9.0_linux_amd64.zip
+unzip terraform_1.9.0_linux_amd64.zip
+mv terraform /usr/local/bin/
+rm terraform_1.9.0_linux_amd64.zip
 
 # Verifier
 terraform version
