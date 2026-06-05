@@ -24,7 +24,7 @@ sed -i '/community/s/^#//g' /etc/apk/repositories
 apk update
 
 # Installer les prérequis et Ansible
-apk add wget unzip ansible curl
+apk add nano git ansible wget unzip curl openssh-client
 
 # Installer Terraform manuellement
 wget https://releases.hashicorp.com/terraform/1.9.0/terraform_1.9.0_linux_amd64.zip
