@@ -133,15 +133,17 @@ ansible-playbook playbook-web.yml --limit web_servers
 
 ```bash
 cd ../terraform
-terraform apply -target='proxmox_virtual_environment_container.lb' -auto-approve
+terraform apply \
+  -target='proxmox_virtual_environment_container.lb' \
+  -auto-approve
 
 # Échange de clés SSH vers la paire de load balancers
-ssh-copy-id -i ~/.ssh/proxmox_lab.pub root@10.0.40.21
-ssh-copy-id -i ~/.ssh/proxmox_lab.pub root@10.0.40.22
+ssh-copy-id -i ~/.ssh/proxmox_lab.pub root@10.0.10.11
+ssh-copy-id -i ~/.ssh/proxmox_lab.pub root@10.0.10.12
 
 # Configuration HAProxy et Keepalived via Ansible
 cd ../ansible
-ansible-playbook playbook-web.yml --limit load_balancers
+ansible-playbook -i inventory.ini playbook-web.yml --limit load_balancers
 ```
 
 ## Validation & Accès Externe

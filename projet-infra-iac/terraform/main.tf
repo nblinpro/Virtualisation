@@ -250,8 +250,8 @@ resource "proxmox_virtual_environment_container" "web" {
 # =============================================================================
 locals {
   lb_servers = {
-    "lb-01" = { vmid = 411, node = "pve-01", ip = "10.0.40.21", state = "MASTER", priority = 110 }
-    "lb-02" = { vmid = 412, node = "pve-02", ip = "10.0.40.22", state = "BACKUP", priority = 100 }
+    "lb-01" = { vmid = 411, node = "pve-01", ip = "10.0.10.11", state = "MASTER", priority = 110 }
+    "lb-02" = { vmid = 412, node = "pve-02", ip = "10.0.10.12", state = "BACKUP", priority = 100 }
   }
 }
 
@@ -261,7 +261,7 @@ resource "proxmox_virtual_environment_container" "lb" {
   description   = "Load Balancer HAProxy + Keepalived (${each.value.state})"
   node_name     = each.value.node
   vm_id         = each.value.vmid
-  tags          = ["loadbalancer", "haproxy", "vlan40"]
+  tags          = ["loadbalancer", "haproxy", "vlan10", "dmz"]
   start_on_boot = true
   unprivileged  = true
 
@@ -270,7 +270,7 @@ resource "proxmox_virtual_environment_container" "lb" {
     ip_config {
       ipv4 {
         address = "${each.value.ip}/24"
-        gateway = "10.0.40.1"
+        gateway = "10.0.10.1"
       }
     }
     dns {
@@ -296,7 +296,7 @@ resource "proxmox_virtual_environment_container" "lb" {
   network_interface {
     name    = "eth0"
     bridge  = "vmbr3"
-    vlan_id = 40
+    vlan_id = 10
   }
   operating_system {
     template_file_id = var.lxc_template
