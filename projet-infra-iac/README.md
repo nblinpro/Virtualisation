@@ -148,6 +148,25 @@ ansible-playbook playbook-web.yml --limit load_balancers
 
 ### Tunneling SSH d'administration (depuis votre poste Windows)
 
+**Prérequis : Installer et configurer SSH sur le bastion (Alpine Linux)**
+Si vous utilisez un conteneur Alpine vierge pour votre bastion, le serveur SSH n'est pas installé par défaut et la redirection de ports est bloquée par sécurité. 
+
+Exécutez ce bloc de commandes sur votre bastion (`deploy-bastion`) pour tout préparer d'un coup :
+
+```bash
+# 1. Installer le serveur SSH
+apk add openssh
+
+# 2. Activer le service pour qu'il se lance au démarrage
+rc-update add sshd default
+rc-service sshd start
+
+# 3. Autoriser le TCP Forwarding dans la configuration SSH
+sed -i 's/.*AllowTcpForwarding.*/AllowTcpForwarding yes/' /etc/ssh/sshd_config
+
+# 4. Appliquer la configuration
+rc-service sshd restart
+
 Pour accéder en toute sécurité aux services Web internes et aux statistiques d'infrastructure isolés derrière le bastion, initialisez le port-forwarding local SSH suivant :
 
 ```powershell
