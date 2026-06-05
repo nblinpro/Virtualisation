@@ -166,6 +166,7 @@ sed -i 's/.*AllowTcpForwarding.*/AllowTcpForwarding yes/' /etc/ssh/sshd_config
 
 # 4. Appliquer la configuration
 rc-service sshd restart
+```
 
 Pour accéder en toute sécurité aux services Web internes et aux statistiques d'infrastructure isolés derrière le bastion, initialisez le port-forwarding local SSH suivant :
 
