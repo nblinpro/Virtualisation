@@ -1,0 +1,392 @@
+---
+# =============================================================================
+# Pre-requis systeme
+# =============================================================================
+- name: Installer les paquets de base
+  ansible.builtin.apt:
+    name:
+      - wget
+      - sudo
+      - curl
+      - tar
+      - gnupg
+      - gnupg2
+      - ca-certificates
+      - apt-transport-https
+      - lsb-release
+      - python3-pymysql
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# =============================================================================
+# MariaDB
+# =============================================================================
+- name: Installer MariaDB
+  ansible.builtin.apt:
+    name:
+      - mariadb-server
+      - mariadb-client
+    state: present
+
+- name: Demarrer et activer MariaDB
+  ansible.builtin.systemd:
+    name: mariadb
+    state: started
+    enabled: true
+
+- name: Definir le mot de passe root MariaDB (premiere fois)
+  ansible.builtin.shell:
+    cmd: |
+      mariadb -uroot <<-EOF
+      ALTER USER 'root'@'localhost' IDENTIFIED BY '{{ mariadb_root_password }}';
+      DELETE FROM mysql.user WHERE User='';
+      DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+      DROP DATABASE IF EXISTS test;
+      FLUSH PRIVILEGES;
+      EOF
+  register: mariadb_root_pw
+  changed_when: mariadb_root_pw.rc == 0
+  failed_when: false
+
+- name: Creer le fichier .my.cnf pour root (idempotence des commandes futures)
+  ansible.builtin.copy:
+    dest: /root/.my.cnf
+    owner: root
+    group: root
+    mode: '0600'
+    content: |
+      [client]
+      user=root
+      password={{ mariadb_root_password }}
+
+- name: Creer la BDD GLPI
+  community.mysql.mysql_db:
+    name: "{{ mariadb_glpi_database }}"
+    state: present
+    encoding: utf8mb4
+    collation: utf8mb4_unicode_ci
+    login_unix_socket: /run/mysqld/mysqld.sock
+
+- name: Creer le user GLPI
+  community.mysql.mysql_user:
+    name: "{{ mariadb_glpi_user }}"
+    password: "{{ mariadb_glpi_password }}"
+    priv: "{{ mariadb_glpi_database }}.*:ALL"
+    host: localhost
+    state: present
+    login_unix_socket: /run/mysqld/mysqld.sock
+
+- name: Donner acces aux fuseaux horaires (necessaire pour GLPI)
+  ansible.builtin.shell:
+    cmd: |
+      mysql_tzinfo_to_sql /usr/share/zoneinfo | mariadb -uroot mysql
+  register: tz_load
+  changed_when: tz_load.rc == 0
+  failed_when: false
+
+- name: Autoriser glpi a lire mysql.time_zone_name
+  community.mysql.mysql_user:
+    name: "{{ mariadb_glpi_user }}"
+    append_privs: true
+    priv: "mysql.time_zone_name:SELECT"
+    host: localhost
+    state: present
+    login_unix_socket: /run/mysqld/mysqld.sock
+
+# =============================================================================
+# Repo Sury (PHP 8.3 - GLPI 10 ne supporte pas PHP 8.4)
+# =============================================================================
+- name: Creer le dossier /etc/apt/keyrings
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Telecharger la cle GPG du repo Sury
+  ansible.builtin.get_url:
+    url: https://packages.sury.org/php/apt.gpg
+    dest: /etc/apt/keyrings/sury.gpg
+    mode: '0644'
+
+- name: Detecter le codename Debian
+  ansible.builtin.command:
+    cmd: lsb_release -sc
+  register: debian_codename
+  changed_when: false
+
+- name: Ajouter le repo Sury PHP
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/sury-php.list
+    mode: '0644'
+    content: "deb [signed-by=/etc/apt/keyrings/sury.gpg] https://packages.sury.org/php/ {{ debian_codename.stdout }} main\n"
+  register: sury_repo
+
+- name: Mise a jour APT apres ajout Sury
+  ansible.builtin.apt:
+    update_cache: true
+  when: sury_repo.changed
+
+# =============================================================================
+# PHP 8.3 + Apache
+# =============================================================================
+- name: Installer Apache et PHP {{ php_version }}
+  ansible.builtin.apt:
+    name:
+      - apache2
+      - "libapache2-mod-php{{ php_version }}"
+      - "php{{ php_version }}"
+      - "php{{ php_version }}-cli"
+      - "php{{ php_version }}-common"
+      - "php{{ php_version }}-curl"
+      - "php{{ php_version }}-gd"
+      - "php{{ php_version }}-intl"
+      - "php{{ php_version }}-mbstring"
+      - "php{{ php_version }}-mysql"
+      - "php{{ php_version }}-xml"
+      - "php{{ php_version }}-zip"
+      - "php{{ php_version }}-bz2"
+      - "php{{ php_version }}-ldap"
+      - "php{{ php_version }}-apcu"
+      - "php{{ php_version }}-bcmath"
+      - "php{{ php_version }}-soap"
+      - "php{{ php_version }}-opcache"
+    state: present
+    update_cache: true
+
+- name: Desactiver le module PHP 8.4 si present
+  ansible.builtin.command:
+    cmd: a2dismod php8.4
+  register: dismod_84
+  changed_when: "'already disabled' not in dismod_84.stderr"
+  failed_when: false
+
+- name: Activer le module PHP {{ php_version }}
+  ansible.builtin.command:
+    cmd: "a2enmod php{{ php_version }}"
+  register: enmod_php
+  changed_when: "'already enabled' not in enmod_php.stdout"
+  notify: restart apache2
+
+- name: Definir PHP {{ php_version }} comme version par defaut en CLI
+  ansible.builtin.command:
+    cmd: "update-alternatives --set php /usr/bin/php{{ php_version }}"
+  register: php_alt
+  changed_when: php_alt.rc == 0
+  failed_when: false
+
+- name: Stocker la version PHP utilisee
+  ansible.builtin.set_fact:
+    php_version_real: "{{ php_version }}"
+
+- name: Configurer PHP (memory_limit, upload_max, ...)
+  ansible.builtin.lineinfile:
+    path: "/etc/php/{{ php_version_real }}/apache2/php.ini"
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    backrefs: true
+  loop:
+    - { regexp: '^memory_limit\s*=', line: "memory_limit = {{ php_memory_limit }}" }
+    - { regexp: '^post_max_size\s*=', line: "post_max_size = {{ php_post_max_size }}" }
+    - { regexp: '^upload_max_filesize\s*=', line: "upload_max_filesize = {{ php_upload_max_filesize }}" }
+    - { regexp: '^max_execution_time\s*=', line: "max_execution_time = {{ php_max_execution_time }}" }
+    - { regexp: '^;?session.cookie_httponly\s*=', line: "session.cookie_httponly = On" }
+  notify: restart apache2
+
+# =============================================================================
+# Telechargement et installation de GLPI
+# =============================================================================
+- name: Verifier si GLPI est deja installe
+  ansible.builtin.stat:
+    path: "{{ glpi_install_dir }}/index.php"
+  register: glpi_installed
+
+- name: Telecharger GLPI {{ glpi_version }}
+  ansible.builtin.get_url:
+    url: "{{ glpi_url }}"
+    dest: "/tmp/glpi-{{ glpi_version }}.tgz"
+    mode: '0644'
+  when: not glpi_installed.stat.exists
+
+- name: Creer le dossier d'installation
+  ansible.builtin.file:
+    path: "{{ glpi_install_dir }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+
+- name: Decompresser GLPI
+  ansible.builtin.unarchive:
+    src: "/tmp/glpi-{{ glpi_version }}.tgz"
+    dest: "/var/www"
+    remote_src: true
+    owner: www-data
+    group: www-data
+    creates: "{{ glpi_install_dir }}/index.php"
+  when: not glpi_installed.stat.exists
+
+- name: Nettoyer l'archive
+  ansible.builtin.file:
+    path: "/tmp/glpi-{{ glpi_version }}.tgz"
+    state: absent
+
+- name: Creer les dossiers data, config et log
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+  loop:
+    - "{{ glpi_data_dir }}"
+    - "{{ glpi_config_dir }}"
+    - "{{ glpi_log_dir }}"
+
+# Securisation : deplacer files/ et config/ hors du webroot
+- name: Configurer les chemins externes (downstream.php)
+  ansible.builtin.copy:
+    dest: "{{ glpi_install_dir }}/inc/downstream.php"
+    owner: www-data
+    group: www-data
+    mode: '0644'
+    content: |
+      <?php
+      define('GLPI_CONFIG_DIR', '{{ glpi_config_dir }}/');
+      if (file_exists(GLPI_CONFIG_DIR . '/local_define.php')) {
+          require_once GLPI_CONFIG_DIR . '/local_define.php';
+      }
+
+- name: Configurer GLPI_VAR_DIR (local_define.php)
+  ansible.builtin.copy:
+    dest: "{{ glpi_config_dir }}/local_define.php"
+    owner: www-data
+    group: www-data
+    mode: '0644'
+    content: |
+      <?php
+      define('GLPI_VAR_DIR', '{{ glpi_data_dir }}');
+      define('GLPI_LOG_DIR', '{{ glpi_log_dir }}');
+
+# Deplacer les dossiers de donnees si besoin
+- name: Verifier si files/ existe encore dans webroot
+  ansible.builtin.stat:
+    path: "{{ glpi_install_dir }}/files"
+  register: glpi_files_dir
+
+- name: Deplacer files/ dans le data_dir
+  ansible.builtin.shell:
+    cmd: |
+      mv {{ glpi_install_dir }}/files/* {{ glpi_data_dir }}/ 2>/dev/null || true
+      rm -rf {{ glpi_install_dir }}/files
+  when: glpi_files_dir.stat.exists
+  changed_when: true
+
+- name: Recreer le lien symbolique files
+  ansible.builtin.file:
+    src: "{{ glpi_data_dir }}"
+    dest: "{{ glpi_install_dir }}/files"
+    state: link
+    force: true
+
+- name: Permissions sur l'ensemble GLPI
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: www-data
+    group: www-data
+    recurse: true
+  loop:
+    - "{{ glpi_install_dir }}"
+    - "{{ glpi_data_dir }}"
+    - "{{ glpi_config_dir }}"
+    - "{{ glpi_log_dir }}"
+
+# =============================================================================
+# Configuration Apache (vhost)
+# =============================================================================
+- name: Desactiver le site par defaut
+  ansible.builtin.command:
+    cmd: a2dissite 000-default
+  register: dissite_result
+  changed_when: "'already disabled' not in dissite_result.stderr"
+  failed_when: false
+
+- name: Deployer le vhost GLPI
+  ansible.builtin.template:
+    src: apache-glpi.conf.j2
+    dest: /etc/apache2/sites-available/glpi.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart apache2
+
+- name: Activer le site GLPI
+  ansible.builtin.command:
+    cmd: a2ensite glpi
+  register: ensite_result
+  changed_when: "'already enabled' not in ensite_result.stdout"
+
+- name: Activer les modules Apache requis
+  ansible.builtin.command:
+    cmd: "a2enmod {{ item }}"
+  register: enmod
+  changed_when: "'already enabled' not in enmod.stdout"
+  loop:
+    - rewrite
+    - headers
+
+- name: Demarrer et activer Apache
+  ansible.builtin.systemd:
+    name: apache2
+    state: started
+    enabled: true
+
+# =============================================================================
+# Installation CLI de GLPI (auto-config sans installer web)
+# =============================================================================
+- name: Verifier si GLPI est deja configure
+  ansible.builtin.stat:
+    path: "{{ glpi_config_dir }}/config_db.php"
+  register: glpi_configured
+
+- name: Creer un dossier tmp Ansible pour www-data
+  ansible.builtin.file:
+    path: /tmp/.ansible-www-data
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0700'
+
+- name: Installer GLPI via la CLI
+  ansible.builtin.command:
+    cmd: >
+      php bin/console db:install
+      --db-host=localhost
+      --db-name={{ mariadb_glpi_database }}
+      --db-user={{ mariadb_glpi_user }}
+      --db-password={{ mariadb_glpi_password }}
+      --default-language=fr_FR
+      --force
+      --no-interaction
+    chdir: "{{ glpi_install_dir }}"
+  become_user: www-data
+  vars:
+    ansible_remote_tmp: /tmp/.ansible-www-data
+  when: not glpi_configured.stat.exists
+  register: glpi_install_cli
+  changed_when: glpi_install_cli.rc == 0
+
+- name: Supprimer le fichier install.php (recommandation securite)
+  ansible.builtin.file:
+    path: "{{ glpi_install_dir }}/install/install.php"
+    state: absent
+
+# =============================================================================
+# Tache cron pour GLPI
+# =============================================================================
+- name: Ajouter la tache cron GLPI
+  ansible.builtin.cron:
+    name: "GLPI internal tasks"
+    user: www-data
+    minute: "*/2"
+    job: "/usr/bin/php {{ glpi_install_dir }}/front/cron.php &>/dev/null"

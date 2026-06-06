@@ -1,0 +1,50 @@
+---
+# =============================================================================
+# Playbook : Deploiement GLPI 10 (gestion de parc IT + helpdesk)
+# =============================================================================
+- name: Deploiement GLPI
+  hosts: glpi_server
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Attendre que le LXC soit accessible
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 120
+
+    - name: Mise a jour APT
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      register: apt_result
+      until: apt_result is success
+      retries: 10
+      delay: 5
+
+  roles:
+    - glpi
+
+  post_tasks:
+    - name: Verifier que Apache est actif
+      ansible.builtin.systemd:
+        name: apache2
+      register: apache_status
+      changed_when: false
+
+    - name: Verifier que MariaDB est active
+      ansible.builtin.systemd:
+        name: mariadb
+      register: mariadb_status
+      changed_when: false
+
+    - name: Resume GLPI
+      ansible.builtin.debug:
+        msg:
+          - "GLPI deploye avec succes"
+          - "URL              : http://10.0.20.50"
+          - "Login admin      : glpi / glpi"
+          - "                   (a changer apres la 1ere connexion)"
+          - "BDD root         : root / {{ mariadb_root_password }}"
+          - "BDD glpi         : glpi / {{ mariadb_glpi_password }}"
+          - "Etape finale     : Lancer l'installer web via le navigateur"

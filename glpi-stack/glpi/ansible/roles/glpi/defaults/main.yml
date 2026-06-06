@@ -1,0 +1,31 @@
+---
+# =============================================================================
+# Variables par defaut pour le role GLPI
+# =============================================================================
+
+# Version de GLPI a installer
+glpi_version: "10.0.18"
+glpi_url: "https://github.com/glpi-project/glpi/releases/download/{{ glpi_version }}/glpi-{{ glpi_version }}.tgz"
+
+# Chemins
+glpi_install_dir: "/var/www/glpi"
+glpi_data_dir: "/var/lib/glpi"
+glpi_config_dir: "/etc/glpi"
+glpi_log_dir: "/var/log/glpi"
+
+# MariaDB
+mariadb_root_password: "Ynov2026!Root"
+mariadb_glpi_database: "glpi"
+mariadb_glpi_user: "glpi"
+mariadb_glpi_password: "Ynov2026!GlpiDB"
+
+# Apache / vhost
+glpi_server_name: "glpi.infra.lan"
+glpi_http_port: 80
+
+# PHP
+php_version: "8.3"
+php_memory_limit: "256M"
+php_post_max_size: "20M"
+php_upload_max_filesize: "20M"
+php_max_execution_time: 300
