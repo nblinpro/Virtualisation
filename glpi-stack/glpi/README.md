@@ -7,7 +7,7 @@ Deploiement automatise de GLPI 10 pour le projet M1 Virtualisation Ynov.
 ```
 glpi-01 (LXC, VLAN 20 - 10.0.20.50) :
   - Apache 2.4
-  - PHP 8.2
+  - PHP 8.3
   - MariaDB 11
   - GLPI 10.0.18
 ```
@@ -44,6 +44,9 @@ ansible-playbook -i inventories/hosts.ini playbooks/deploy-glpi.yml
 |-------------|---------------------------------|
 | URL         | http://10.0.20.50               |
 | Login       | glpi / glpi                     |
+|             | tech / tech                     |
+|             | normal / normal                 |
+|             | post-only / postonly            |
 | BDD root    | root / Ynov2026!Root            |
 | BDD glpi    | glpi / Ynov2026!GlpiDB          |
 
