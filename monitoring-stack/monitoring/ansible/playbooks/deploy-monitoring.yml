@@ -1,6 +1,8 @@
 ---
 # =============================================================================
 # Playbook : Deploiement complet du stack de monitoring
+# Ordre important : Loki (monitoring_server) AVANT les clients Promtail,
+# sinon les agents demarrent et poussent vers un Loki inexistant -> logs perdus.
 # =============================================================================
 
 # 1. Installer node_exporter sur toutes les cibles
@@ -25,19 +27,20 @@
   gather_facts: true
 
   roles:
-    - pve_route  
+    - pve_route       # route statique retour vers le VLAN monitoring (anti-asymetrie)
     - pve_exporter
 
-# 3. Installer Promtail sur les clients (envoi logs vers Loki)
-- name: Installation Promtail sur les clients
-  hosts: promtail_clients
+# 3. Activer l'exporter Prometheus HAProxy sur les load-balancers
+- name: Activation exporter HAProxy sur les LB
+  hosts: haproxy_servers
   become: true
-  gather_facts: true
+  gather_facts: false
 
   roles:
-    - promtail_client
+    - haproxy_exporter
 
 # 4. Installer le serveur monitoring (Prometheus + Grafana + Loki + Promtail local)
+#    --> AVANT les clients Promtail pour que Loki existe quand ils demarrent
 - name: Installation du serveur monitoring all-in-one
   hosts: monitoring_server
   become: true
@@ -62,6 +65,28 @@
     - monitoring_server
 
   post_tasks:
+    - name: Verifier que Loki est actif
+      ansible.builtin.systemd:
+        name: loki
+      register: loki_status
+      changed_when: false
+
+# 5. Installer Promtail sur les clients (envoi logs vers Loki, deja en ligne)
+- name: Installation Promtail sur les clients
+  hosts: promtail_clients
+  become: true
+  gather_facts: true
+
+  roles:
+    - promtail_client
+
+# 6. Verifications finales
+- name: Verification du stack monitoring
+  hosts: monitoring_server
+  become: true
+  gather_facts: false
+
+  tasks:
     - name: Verifier que Prometheus est actif
       ansible.builtin.systemd:
         name: prometheus
@@ -72,12 +97,6 @@
       ansible.builtin.systemd:
         name: grafana-server
       register: graf_status
-      changed_when: false
-
-    - name: Verifier que Loki est actif
-      ansible.builtin.systemd:
-        name: loki
-      register: loki_status
       changed_when: false
 
     - name: Resume monitoring

@@ -276,6 +276,7 @@
     group: grafana
     mode: '0644'
   loop:
+    - grafana-haproxy.json
     - grafana-node-exporter.json
     - grafana-proxmox-pve.json
   notify: restart grafana

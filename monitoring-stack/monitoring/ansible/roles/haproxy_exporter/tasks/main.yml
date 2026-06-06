@@ -1,0 +1,12 @@
+---
+# Active l'exporter Prometheus natif de HAProxy sur le frontend qui bind :8404.
+# Idempotent (lineinfile ne duplique pas la ligne) et securise par 'validate'
+# (la modif est rejetee si elle casse la config HAProxy).
+- name: HAPROXY - Activer l'exporter Prometheus sur le frontend :8404
+  ansible.builtin.lineinfile:
+    path: /etc/haproxy/haproxy.cfg
+    line: "    http-request use-service prometheus-exporter if { path /metrics }"
+    insertafter: '^\s*bind\b.*:8404'
+    state: present
+    validate: 'haproxy -c -f %s'
+  notify: reload haproxy
