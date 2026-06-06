@@ -1,0 +1,29 @@
+---
+- name: Deployer le service de route statique vers le VLAN monitoring
+  ansible.builtin.template:
+    src: monitoring-route.service.j2
+    dest: /etc/systemd/system/monitoring-route.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart monitoring-route
+
+- name: Activer et appliquer la route statique
+  ansible.builtin.systemd:
+    name: monitoring-route
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Verifier que la route est bien presente dans la table de routage
+  ansible.builtin.command:
+    cmd: "ip route show {{ pve_route_monitoring_subnet }}"
+  register: pve_route_check
+  changed_when: false
+
+- name: Echouer si la route est absente
+  ansible.builtin.assert:
+    that:
+      - pve_route_gateway in pve_route_check.stdout
+    fail_msg: "Route vers {{ pve_route_monitoring_subnet }} ABSENTE sur {{ inventory_hostname }} !"
+    success_msg: "Route OK sur {{ inventory_hostname }} : {{ pve_route_check.stdout | trim }}"

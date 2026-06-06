@@ -1,0 +1,78 @@
+---
+- name: Verifier si le user monitor existe deja
+  ansible.builtin.command:
+    cmd: pveum user list --output-format json
+  register: pve_users
+  changed_when: false
+  run_once: true
+  delegate_to: pve-01
+
+- name: Creer le user monitor@pve sur Proxmox
+  ansible.builtin.command:
+    cmd: "pveum user add {{ pve_exporter_user }} --password {{ pve_exporter_password }} --comment 'Monitor user for Prometheus'"
+  when: "pve_exporter_user not in pve_users.stdout"
+  register: pve_user_create
+  changed_when: pve_user_create.rc == 0
+  failed_when: pve_user_create.rc != 0 and 'already exists' not in pve_user_create.stderr
+  run_once: true
+  delegate_to: pve-01
+
+- name: Assigner le role PVEAuditor au user monitor (read-only)
+  ansible.builtin.command:
+    cmd: "pveum aclmod / --users {{ pve_exporter_user }} --roles PVEAuditor"
+  register: pve_acl
+  changed_when: pve_acl.rc == 0
+  failed_when: false
+  run_once: true
+  delegate_to: pve-01
+
+- name: Installer Python pour pve-exporter
+  ansible.builtin.apt:
+    name:
+      - python3-pip
+      - python3-venv
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Creer le venv pour pve-exporter
+  ansible.builtin.command:
+    cmd: python3 -m venv /opt/pve-exporter
+    creates: /opt/pve-exporter/bin/python3
+
+- name: Installer pve-exporter dans le venv
+  ansible.builtin.pip:
+    name: prometheus-pve-exporter
+    state: present
+    virtualenv: /opt/pve-exporter
+
+- name: Creer le dossier de config
+  ansible.builtin.file:
+    path: /etc/pve-exporter
+    state: directory
+    mode: '0755'
+
+- name: Deployer la config pve-exporter
+  ansible.builtin.template:
+    src: pve.yml.j2
+    dest: /etc/pve-exporter/pve.yml
+    owner: root
+    group: root
+    mode: '0640'
+  notify: restart pve-exporter
+
+- name: Deployer le service systemd
+  ansible.builtin.template:
+    src: pve-exporter.service.j2
+    dest: /etc/systemd/system/pve-exporter.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart pve-exporter
+
+- name: Activer et demarrer pve-exporter
+  ansible.builtin.systemd:
+    name: pve-exporter
+    enabled: true
+    state: started
+    daemon_reload: true

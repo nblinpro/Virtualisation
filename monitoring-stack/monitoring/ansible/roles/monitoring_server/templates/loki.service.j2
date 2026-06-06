@@ -1,0 +1,14 @@
+[Unit]
+Description=Loki (log aggregator)
+After=network.target
+
+[Service]
+User={{ loki_user }}
+Group={{ loki_user }}
+Type=simple
+ExecStart=/usr/local/bin/loki -config.file=/etc/loki/config.yml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

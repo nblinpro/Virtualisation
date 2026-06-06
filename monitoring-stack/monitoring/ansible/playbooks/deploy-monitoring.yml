@@ -1,0 +1,89 @@
+---
+# =============================================================================
+# Playbook : Deploiement complet du stack de monitoring
+# =============================================================================
+
+# 1. Installer node_exporter sur toutes les cibles
+- name: Installation node_exporter sur les LXC applicatifs
+  hosts: node_exporter_targets
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Attendre que le LXC soit accessible
+      ansible.builtin.wait_for_connection:
+        delay: 3
+        timeout: 60
+
+  roles:
+    - node_exporter
+
+# 2. Installer pve-exporter sur les hyperviseurs Proxmox
+- name: Installation pve-exporter sur les hyperviseurs
+  hosts: pve_hosts
+  become: true
+  gather_facts: true
+
+  roles:
+    - pve_route  
+    - pve_exporter
+
+# 3. Installer Promtail sur les clients (envoi logs vers Loki)
+- name: Installation Promtail sur les clients
+  hosts: promtail_clients
+  become: true
+  gather_facts: true
+
+  roles:
+    - promtail_client
+
+# 4. Installer le serveur monitoring (Prometheus + Grafana + Loki + Promtail local)
+- name: Installation du serveur monitoring all-in-one
+  hosts: monitoring_server
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Attendre que le LXC soit accessible
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 120
+
+    - name: Mise a jour APT
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      register: apt_result
+      until: apt_result is success
+      retries: 10
+      delay: 5
+
+  roles:
+    - monitoring_server
+
+  post_tasks:
+    - name: Verifier que Prometheus est actif
+      ansible.builtin.systemd:
+        name: prometheus
+      register: prom_status
+      changed_when: false
+
+    - name: Verifier que Grafana est actif
+      ansible.builtin.systemd:
+        name: grafana-server
+      register: graf_status
+      changed_when: false
+
+    - name: Verifier que Loki est actif
+      ansible.builtin.systemd:
+        name: loki
+      register: loki_status
+      changed_when: false
+
+    - name: Resume monitoring
+      ansible.builtin.debug:
+        msg:
+          - "Monitoring all-in-one deploye avec succes"
+          - "Prometheus  : http://10.0.60.10:9090"
+          - "Grafana     : http://10.0.60.10:3000 (admin / Ynov2026!)"
+          - "Loki        : http://10.0.60.10:3100"

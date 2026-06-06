@@ -1,0 +1,4 @@
+---
+pve_exporter_port: 9221
+pve_exporter_user: "monitor@pve"
+pve_exporter_password: "Ynov2026!Mon"

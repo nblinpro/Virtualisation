@@ -1,0 +1,21 @@
+[Unit]
+Description=Prometheus
+After=network.target
+
+[Service]
+User={{ prometheus_user }}
+Group={{ prometheus_user }}
+Type=simple
+ExecStart=/usr/local/bin/prometheus \
+  --config.file=/etc/prometheus/prometheus.yml \
+  --storage.tsdb.path={{ prometheus_data_dir }} \
+  --storage.tsdb.retention.time={{ prometheus_retention }} \
+  --storage.tsdb.retention.size={{ prometheus_retention_size }} \
+  --web.console.libraries=/usr/share/prometheus/console_libraries \
+  --web.console.templates=/usr/share/prometheus/consoles \
+  --web.listen-address=:9090
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

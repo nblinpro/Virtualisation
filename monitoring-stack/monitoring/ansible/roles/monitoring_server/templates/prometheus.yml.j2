@@ -1,0 +1,46 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'ynov-lab'
+
+# Scrape configs
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # node_exporter sur les LXC applicatifs
+  - job_name: 'node_exporter'
+    static_configs:
+{% for target in node_exporter_targets %}
+      - targets: ['{{ target.ip }}:9100']
+        labels:
+          instance: '{{ target.name }}'
+          vlan: '{{ target.vlan }}'
+{% endfor %}
+
+  # pve-exporter sur les hyperviseurs
+  - job_name: 'pve'
+    static_configs:
+{% for target in pve_targets %}
+      - targets: ['{{ target.ip }}:9221']
+        labels:
+          instance: '{{ target.name }}'
+{% endfor %}
+    metrics_path: /pve
+    params:
+      module: [default]
+      cluster: ['1']
+      node: ['1']
+
+  # HAProxy stats (via les LB)
+  - job_name: 'haproxy'
+    metrics_path: '/stats'
+    params:
+      stats: ['']
+    static_configs:
+      - targets: ['10.0.10.11:8404', '10.0.10.12:8404']
+        labels:
+          service: 'haproxy'

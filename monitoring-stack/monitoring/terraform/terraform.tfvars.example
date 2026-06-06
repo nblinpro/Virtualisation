@@ -1,0 +1,11 @@
+# Configuration Terraform pour le LXC monitoring-01
+# Copier ce fichier en terraform.tfvars et personnaliser
+
+proxmox_endpoint  = "https://192.168.3.21:8006/"
+proxmox_api_token = "root@pam!terraform=XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
+
+ssh_private_key   = "~/.ssh/proxmox_lab"
+ssh_public_key    = "~/.ssh/proxmox_lab.pub"
+
+lxc_root_password = "Ynov2026!Mon"
+ceph_pool         = "ceph_vm"

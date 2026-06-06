@@ -1,0 +1,72 @@
+---
+- name: Verifier si node_exporter est deja installe
+  ansible.builtin.stat:
+    path: /usr/local/bin/node_exporter
+  register: ne_binary
+
+- name: Creer le user node_exporter (sans login)
+  ansible.builtin.user:
+    name: "{{ node_exporter_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Installer wget et tar
+  ansible.builtin.apt:
+    name:
+      - wget
+      - tar
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: not ne_binary.stat.exists
+
+- name: Telecharger node_exporter
+  ansible.builtin.get_url:
+    url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/node_exporter.tar.gz"
+    mode: '0644'
+  when: not ne_binary.stat.exists
+
+- name: Decompresser node_exporter
+  ansible.builtin.unarchive:
+    src: "/tmp/node_exporter.tar.gz"
+    dest: "/tmp"
+    remote_src: true
+  when: not ne_binary.stat.exists
+
+- name: Installer le binaire dans /usr/local/bin
+  ansible.builtin.copy:
+    src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+    dest: /usr/local/bin/node_exporter
+    owner: "{{ node_exporter_user }}"
+    group: "{{ node_exporter_user }}"
+    mode: '0755'
+    remote_src: true
+  when: not ne_binary.stat.exists
+  notify: restart node_exporter
+
+- name: Nettoyer les fichiers temporaires
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/node_exporter.tar.gz
+    - "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64"
+  when: not ne_binary.stat.exists
+
+- name: Deployer le service systemd
+  ansible.builtin.template:
+    src: node_exporter.service.j2
+    dest: /etc/systemd/system/node_exporter.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart node_exporter
+
+- name: Activer et demarrer node_exporter
+  ansible.builtin.systemd:
+    name: node_exporter
+    enabled: true
+    state: started
+    daemon_reload: true

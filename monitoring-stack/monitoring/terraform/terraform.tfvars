@@ -1,0 +1,8 @@
+proxmox_endpoint  = "https://192.168.3.21:8006/"
+proxmox_api_token = "root@pam!terraform-token=4e6e70bc-5d4a-423b-a67f-c5f5b39adb3a"
+
+ssh_private_key   = "~/.ssh/proxmox_lab"
+ssh_public_key    = "~/.ssh/proxmox_lab.pub"
+
+lxc_root_password = "Ynov2026!Mon"
+ceph_pool         = "ceph_vm"

@@ -1,0 +1,13 @@
+[Unit]
+Description=Route statique vers le VLAN monitoring ({{ pve_route_monitoring_subnet }})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/ip route replace {{ pve_route_monitoring_subnet }} via {{ pve_route_gateway }}
+ExecStop=/usr/sbin/ip route del {{ pve_route_monitoring_subnet }} via {{ pve_route_gateway }}
+
+[Install]
+WantedBy=multi-user.target

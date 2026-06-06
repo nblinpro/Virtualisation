@@ -1,0 +1,288 @@
+---
+# =============================================================================
+# Pre-requis communs
+# =============================================================================
+- name: Installer les paquets de base
+  ansible.builtin.apt:
+    name:
+      - wget
+      - tar
+      - unzip
+      - apt-transport-https
+      - gnupg
+      - ca-certificates
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# =============================================================================
+# PROMETHEUS
+# =============================================================================
+- name: PROMETHEUS - Creer user systeme
+  ansible.builtin.user:
+    name: "{{ prometheus_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: PROMETHEUS - Creer les dossiers
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_user }}"
+    mode: '0755'
+  loop:
+    - /etc/prometheus
+    - "{{ prometheus_data_dir }}"
+
+- name: PROMETHEUS - Verifier installation
+  ansible.builtin.stat:
+    path: /usr/local/bin/prometheus
+  register: prom_binary
+
+- name: PROMETHEUS - Telecharger
+  ansible.builtin.get_url:
+    url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+    dest: /tmp/prometheus.tar.gz
+    mode: '0644'
+  when: not prom_binary.stat.exists
+
+- name: PROMETHEUS - Decompresser
+  ansible.builtin.unarchive:
+    src: /tmp/prometheus.tar.gz
+    dest: /tmp
+    remote_src: true
+  when: not prom_binary.stat.exists
+
+- name: PROMETHEUS - Installer les binaires
+  ansible.builtin.copy:
+    src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_user }}"
+    mode: '0755'
+    remote_src: true
+  loop:
+    - prometheus
+    - promtool
+  when: not prom_binary.stat.exists
+
+- name: PROMETHEUS - Nettoyer
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/prometheus.tar.gz
+    - "/tmp/prometheus-{{ prometheus_version }}.linux-amd64"
+  when: not prom_binary.stat.exists
+
+- name: PROMETHEUS - Deployer config
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: /etc/prometheus/prometheus.yml
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_user }}"
+    mode: '0644'
+  notify: restart prometheus
+
+- name: PROMETHEUS - Deployer service systemd
+  ansible.builtin.template:
+    src: prometheus.service.j2
+    dest: /etc/systemd/system/prometheus.service
+    mode: '0644'
+  notify: restart prometheus
+
+- name: PROMETHEUS - Activer et demarrer
+  ansible.builtin.systemd:
+    name: prometheus
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# =============================================================================
+# LOKI
+# =============================================================================
+- name: LOKI - Creer user systeme
+  ansible.builtin.user:
+    name: "{{ loki_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: LOKI - Creer les dossiers
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ loki_user }}"
+    group: "{{ loki_user }}"
+    mode: '0755'
+  loop:
+    - /etc/loki
+    - "{{ loki_data_dir }}"
+    - "{{ loki_data_dir }}/chunks"
+    - "{{ loki_data_dir }}/index"
+    - "{{ loki_data_dir }}/boltdb-shipper-active"
+    - "{{ loki_data_dir }}/boltdb-shipper-cache"
+    - "{{ loki_data_dir }}/compactor"
+
+- name: LOKI - Verifier installation
+  ansible.builtin.stat:
+    path: /usr/local/bin/loki
+  register: loki_binary
+
+- name: LOKI - Telecharger
+  ansible.builtin.get_url:
+    url: "https://github.com/grafana/loki/releases/download/v{{ loki_version }}/loki-linux-amd64.zip"
+    dest: /tmp/loki.zip
+    mode: '0644'
+  when: not loki_binary.stat.exists
+
+- name: LOKI - Decompresser
+  ansible.builtin.unarchive:
+    src: /tmp/loki.zip
+    dest: /tmp
+    remote_src: true
+  when: not loki_binary.stat.exists
+
+- name: LOKI - Installer binaire
+  ansible.builtin.copy:
+    src: /tmp/loki-linux-amd64
+    dest: /usr/local/bin/loki
+    owner: "{{ loki_user }}"
+    group: "{{ loki_user }}"
+    mode: '0755'
+    remote_src: true
+  when: not loki_binary.stat.exists
+  notify: restart loki
+
+- name: LOKI - Nettoyer
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/loki.zip
+    - /tmp/loki-linux-amd64
+  when: not loki_binary.stat.exists
+
+- name: LOKI - Deployer config
+  ansible.builtin.template:
+    src: loki-config.yml.j2
+    dest: /etc/loki/config.yml
+    owner: "{{ loki_user }}"
+    group: "{{ loki_user }}"
+    mode: '0644'
+  notify: restart loki
+
+- name: LOKI - Deployer service systemd
+  ansible.builtin.template:
+    src: loki.service.j2
+    dest: /etc/systemd/system/loki.service
+    mode: '0644'
+  notify: restart loki
+
+- name: LOKI - Activer et demarrer
+  ansible.builtin.systemd:
+    name: loki
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# =============================================================================
+# PROMTAIL local (sur le serveur monitoring lui-meme)
+# =============================================================================
+- name: PROMTAIL - Inclure le role promtail_client
+  ansible.builtin.include_role:
+    name: promtail_client
+  vars:
+    loki_endpoint: "http://127.0.0.1:3100"
+
+# =============================================================================
+# GRAFANA
+# =============================================================================
+- name: GRAFANA - Ajouter la cle GPG
+  ansible.builtin.get_url:
+    url: https://apt.grafana.com/gpg.key
+    dest: /etc/apt/trusted.gpg.d/grafana.asc
+    mode: '0644'
+
+- name: GRAFANA - Ajouter le repo APT
+  ansible.builtin.apt_repository:
+    repo: "deb https://apt.grafana.com stable main"
+    state: present
+    filename: grafana
+
+- name: GRAFANA - Installer le paquet
+  ansible.builtin.apt:
+    name: grafana
+    state: present
+    update_cache: true
+
+- name: GRAFANA - Definir le mot de passe admin
+  ansible.builtin.replace:
+    path: /etc/grafana/grafana.ini
+    regexp: '^;admin_password = admin'
+    replace: "admin_password = {{ grafana_admin_password }}"
+  notify: restart grafana
+
+- name: GRAFANA - Creer le dossier provisioning datasources
+  ansible.builtin.file:
+    path: /etc/grafana/provisioning/datasources
+    state: directory
+    owner: grafana
+    group: grafana
+    mode: '0755'
+
+- name: GRAFANA - Provisionner les datasources Prometheus + Loki
+  ansible.builtin.template:
+    src: datasources.yml.j2
+    dest: /etc/grafana/provisioning/datasources/datasources.yml
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  notify: restart grafana
+
+- name: GRAFANA - Creer le dossier provisioning dashboards
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: grafana
+    group: grafana
+    mode: '0755'
+  loop:
+    - /etc/grafana/provisioning/dashboards
+    - /var/lib/grafana/dashboards
+
+- name: GRAFANA - Provisionner le loader de dashboards
+  ansible.builtin.template:
+    src: dashboards-provider.yml.j2
+    dest: /etc/grafana/provisioning/dashboards/default.yml
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  notify: restart grafana
+
+- name: GRAFANA - Supprimer l'ancien dashboard Node Exporter Full
+  ansible.builtin.file:
+    path: /var/lib/grafana/dashboards/node-exporter-full.json
+    state: absent
+  notify: restart grafana
+
+- name: GRAFANA - Deployer les dashboards custom (node_exporter + pve)
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/var/lib/grafana/dashboards/{{ item }}"
+    owner: grafana
+    group: grafana
+    mode: '0644'
+  loop:
+    - grafana-node-exporter.json
+    - grafana-proxmox-pve.json
+  notify: restart grafana
+
+- name: GRAFANA - Activer et demarrer
+  ansible.builtin.systemd:
+    name: grafana-server
+    enabled: true
+    state: started
+    daemon_reload: true

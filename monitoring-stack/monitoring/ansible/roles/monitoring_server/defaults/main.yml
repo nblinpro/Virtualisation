@@ -1,0 +1,33 @@
+---
+# Prometheus
+prometheus_version: "2.54.1"
+prometheus_user: prometheus
+prometheus_data_dir: /var/lib/prometheus
+prometheus_retention: "7d"
+prometheus_retention_size: "1500MB"
+
+# Grafana
+grafana_admin_user: admin
+grafana_admin_password: "Ynov2026!"
+
+# Loki
+loki_version: "3.1.1"
+loki_user: loki
+loki_data_dir: /var/lib/loki
+loki_retention_period: "72h"
+
+# Cibles a scraper (correspondent a node_exporter_targets de l'inventaire)
+node_exporter_targets:
+  - { name: "dns-01",    ip: "10.0.20.10",  vlan: "20" }
+  - { name: "pgsql-01",  ip: "10.0.50.10",  vlan: "50" }
+  - { name: "web-01",    ip: "10.0.40.11",  vlan: "40" }
+  - { name: "web-02",    ip: "10.0.40.12",  vlan: "40" }
+  - { name: "web-03",    ip: "10.0.40.13",  vlan: "40" }
+  - { name: "lb-01",     ip: "10.0.10.11",  vlan: "10" }
+  - { name: "lb-02",     ip: "10.0.10.12",  vlan: "10" }
+
+# Hyperviseurs PVE
+pve_targets:
+  - { name: "pve-01", ip: "192.168.3.21" }
+  - { name: "pve-02", ip: "192.168.3.22" }
+  - { name: "pve-03", ip: "192.168.3.23" }
