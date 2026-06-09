@@ -215,6 +215,11 @@ dig @10.0.20.10 -x 192.168.3.250 +short
 | pgsql-01.infra.lan | 10.0.50.10 | VLAN 50 (DATA) |
 | pbs-01.infra.lan | 10.0.99.10 | Sauvegardes |
 
+## Mots de passe 
+
+|http://IP/stats | admin/Stats2026!|
+
+
 ## Destruction de la plateforme
 
 Pour libérer l'ensemble des ressources allouées sur le cluster Proxmox :
