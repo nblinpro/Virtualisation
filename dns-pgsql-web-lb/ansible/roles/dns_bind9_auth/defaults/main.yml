@@ -1,0 +1,58 @@
+---
+# =============================================================================
+# Defaults - dns_bind9_auth
+# DNS autoritaire BIND9 pour la zone infra.lan
+# =============================================================================
+
+bind_zone: "infra.lan"
+
+# IP du DNS recursif autorise a faire des transferts de zone (AXFR)
+bind_allowed_xfer_clients:
+  - 10.0.20.10
+  - 127.0.0.1
+
+# Reseaux autorises a interroger BIND9
+bind_allowed_query_networks:
+  - 10.0.0.0/8
+  - 192.168.0.0/16
+  - 127.0.0.0/8
+
+# Enregistrements DNS pour la zone infra.lan
+# Format : { name, type, value }
+bind_records:
+  # Hyperviseurs Proxmox
+  - { name: "pve-01",   type: "A", value: "192.168.3.21" }
+  - { name: "pve-02",   type: "A", value: "192.168.3.22" }
+  - { name: "pve-03",   type: "A", value: "192.168.3.23" }
+  - { name: "cluster",  type: "A", value: "192.168.3.20" }
+  # Pare-feu
+  - { name: "fw-01",    type: "A", value: "192.168.3.250" }
+  - { name: "fw",       type: "A", value: "192.168.3.250" }
+  - { name: "opnsense", type: "A", value: "192.168.3.250" }
+  # VLAN 10 - DMZ
+  - { name: "lb-01",    type: "A", value: "10.0.10.11" }
+  - { name: "lb-02",    type: "A", value: "10.0.10.12" }
+  - { name: "lb",       type: "A", value: "10.0.10.100" }
+  - { name: "vip",      type: "A", value: "10.0.10.100" }
+  - { name: "web",      type: "A", value: "10.0.10.100" }
+  - { name: "rproxy",   type: "A", value: "10.0.10.100" }
+  # VLAN 20 - CORE
+  - { name: "dns-rec-01",  type: "A", value: "10.0.20.10" }
+  - { name: "dns-auth-01", type: "A", value: "10.0.20.11" }
+  - { name: "dns",         type: "A", value: "10.0.20.10" }
+  - { name: "glpi-01",     type: "A", value: "10.0.20.50" }
+  - { name: "glpi",        type: "A", value: "10.0.20.50" }
+  # VLAN 40 - BACKEND_WEB
+  - { name: "web-01", type: "A", value: "10.0.40.11" }
+  - { name: "web-02", type: "A", value: "10.0.40.12" }
+  - { name: "web-03", type: "A", value: "10.0.40.13" }
+  # VLAN 50 - BACKEND_DB
+  - { name: "pgsql-01", type: "A", value: "10.0.50.10" }
+  - { name: "db",       type: "A", value: "10.0.50.10" }
+  - { name: "postgres", type: "A", value: "10.0.50.10" }
+  # VLAN 60 - MONITORING
+  - { name: "monitoring-01", type: "A", value: "10.0.60.10" }
+  - { name: "monitoring",    type: "A", value: "10.0.60.10" }
+  - { name: "grafana",       type: "A", value: "10.0.60.10" }
+  - { name: "prometheus",    type: "A", value: "10.0.60.10" }
+  - { name: "loki",          type: "A", value: "10.0.60.10" }

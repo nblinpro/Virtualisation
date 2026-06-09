@@ -1,0 +1,34 @@
+# =============================================================================
+# Configuration Keepalived - {{ ansible_hostname }}
+# Genere par Ansible le {{ ansible_date_time.iso8601 }}
+# Etat : {{ keepalived_state }} (priority {{ keepalived_priority }})
+# =============================================================================
+
+vrrp_script chk_haproxy {
+    script "/etc/keepalived/check_haproxy.sh"
+    interval 2
+    weight 50
+    rise 2
+    fall 3
+}
+
+vrrp_instance VI_1 {
+    state {{ keepalived_state }}
+    interface {{ keepalived_interface }}
+    virtual_router_id {{ keepalived_virtual_router_id }}
+    priority {{ keepalived_priority }}
+    advert_int 1
+
+    authentication {
+        auth_type PASS
+        auth_pass {{ keepalived_auth_password }}
+    }
+
+    virtual_ipaddress {
+        {{ keepalived_vip }}/24
+    }
+
+    track_script {
+        chk_haproxy
+    }
+}

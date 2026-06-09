@@ -1,0 +1,32 @@
+---
+# =============================================================================
+# Defaults - dns_adguard_recursive
+# AdGuard Home : DNS recursif + filtrage publicitaire
+# =============================================================================
+
+adguard_version: "v0.107.55"
+adguard_install_dir: "/opt/AdGuardHome"
+adguard_user: "adguard"
+adguard_workdir: "/opt/AdGuardHome"
+
+# IP du DNS autoritaire BIND9 (pour la zone infra.lan)
+dns_authoritative_ip: "10.0.20.11"
+
+# Domaine interne a forwarder vers BIND9
+internal_domain: "infra.lan"
+
+# Upstream DNS pour les requetes Internet (DNS publics avec DoT)
+upstream_dns:
+  - "tls://1.1.1.1"        # Cloudflare DoT
+  - "tls://1.0.0.1"        # Cloudflare DoT secondaire
+  - "tls://9.9.9.9"        # Quad9 DoT
+
+# Mot de passe admin de l'UI AdGuard
+adguard_admin_user: "admin"
+adguard_admin_password: "Ynov2026!"
+
+# Listes de filtrage activees
+# Format : url, name, enabled
+adguard_filters:
+  - { id: 1, url: "https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt", name: "AdGuard DNS filter", enabled: true }
+  - { id: 2, url: "https://adaway.org/hosts.txt", name: "AdAway Default Blocklist", enabled: true }

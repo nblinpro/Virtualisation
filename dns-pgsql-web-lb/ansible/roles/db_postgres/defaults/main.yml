@@ -1,0 +1,32 @@
+---
+# =============================================================================
+# Defaults pour le role db_postgres
+# =============================================================================
+
+# Version PostgreSQL
+postgres_version: "17"
+
+# Configuration base de donnees applicative
+postgres_db_name: "webapp_db"
+postgres_db_user: "webapp"
+postgres_db_password: "WebApp2026!ChangeMe"
+
+# Encodage et locale
+postgres_encoding: "UTF8"
+postgres_locale: "en_US.UTF-8"
+
+# Reseau
+postgres_listen_addresses: "*"
+postgres_port: 5432
+
+# Autorisation reseau (pg_hba.conf)
+# Subnets autorises a se connecter
+postgres_allowed_subnets:
+  - { source: "10.0.40.0/24", db: "{{ postgres_db_name }}", user: "{{ postgres_db_user }}", method: "scram-sha-256", comment: "BACKEND_WEB" }
+  - { source: "10.0.60.0/24", db: "all", user: "all", method: "scram-sha-256", comment: "MONITORING" }
+  - { source: "192.168.3.0/24", db: "all", user: "all", method: "scram-sha-256", comment: "Admin" }
+
+# Restauration optionnelle d'un dump
+# Si dump_sql_file est defini, restaure le dump apres creation de la BDD
+postgres_restore_dump: false
+postgres_dump_local_path: "/home/ynov/backup-final/webapp_db.sql"

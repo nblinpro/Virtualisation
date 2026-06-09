@@ -1,0 +1,68 @@
+# =============================================================================
+# Configuration HAProxy - Projet Virtualisation M1
+# Genere par Ansible le {{ ansible_date_time.iso8601 }}
+# Backend : cluster web HA
+# =============================================================================
+
+global
+    log /dev/log local0
+    log /dev/log local1 notice
+    chroot /var/lib/haproxy
+    stats socket /run/haproxy/admin.sock mode 660 level admin
+    stats timeout 30s
+    user haproxy
+    group haproxy
+    daemon
+    maxconn 4096
+    ca-base /etc/ssl/certs
+    crt-base /etc/ssl/private
+
+defaults
+    log global
+    mode http
+    option httplog
+    option dontlognull
+    option forwardfor
+    option http-server-close
+    timeout connect 5000
+    timeout client  50000
+    timeout server  50000
+    errorfile 400 /etc/haproxy/errors/400.http
+    errorfile 403 /etc/haproxy/errors/403.http
+    errorfile 408 /etc/haproxy/errors/408.http
+    errorfile 500 /etc/haproxy/errors/500.http
+    errorfile 502 /etc/haproxy/errors/502.http
+    errorfile 503 /etc/haproxy/errors/503.http
+    errorfile 504 /etc/haproxy/errors/504.http
+
+# =============================================================================
+# Frontend public : VIP {{ keepalived_vip }} port {{ haproxy_frontend_port }}
+# =============================================================================
+frontend webapp_front
+    bind {{ keepalived_vip }}:{{ haproxy_frontend_port }}
+    bind *:{{ haproxy_frontend_port }}
+    default_backend webapp_back
+
+# =============================================================================
+# Backend : cluster web (load balancing roundrobin)
+# =============================================================================
+backend webapp_back
+    balance roundrobin
+    option httpchk GET /health.txt
+    http-check expect status 200
+    cookie SERVERID insert indirect nocache
+
+{% for backend in haproxy_backends %}
+    server {{ backend.name }} {{ backend.address }}:{{ backend.port }} check cookie {{ backend.name }} inter 2s fall 3 rise 2
+{% endfor %}
+
+# =============================================================================
+# Stats (interface admin HAProxy)
+# =============================================================================
+frontend stats
+    bind *:{{ haproxy_stats_port }}
+    stats enable
+    stats uri /stats
+    stats refresh 10s
+    stats admin if TRUE
+    stats auth {{ haproxy_stats_user }}:{{ haproxy_stats_password }}

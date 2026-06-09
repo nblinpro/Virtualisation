@@ -1,0 +1,100 @@
+---
+# =============================================================================
+# Role dns_adguard_recursive - Installation et configuration d'AdGuard Home
+# =============================================================================
+
+- name: Installer les paquets de base
+  ansible.builtin.apt:
+    name:
+      - wget
+      - tar
+      - dnsutils
+      - ca-certificates
+      - python3-bcrypt
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Desactiver systemd-resolved (conflit port 53)
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Supprimer le lien /etc/resolv.conf si symbolique
+  ansible.builtin.file:
+    path: /etc/resolv.conf
+    state: absent
+
+- name: Recreer /etc/resolv.conf pointant vers AdGuard local
+  ansible.builtin.copy:
+    dest: /etc/resolv.conf
+    content: |
+      # Resolution locale via AdGuard
+      nameserver 127.0.0.1
+      nameserver 1.1.1.1
+      search infra.lan
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Verifier si AdGuard Home est deja installe
+  ansible.builtin.stat:
+    path: "{{ adguard_install_dir }}/AdGuardHome"
+  register: adguard_binary
+
+- name: Telecharger AdGuard Home {{ adguard_version }}
+  ansible.builtin.get_url:
+    url: "https://github.com/AdguardTeam/AdGuardHome/releases/download/{{ adguard_version }}/AdGuardHome_linux_amd64.tar.gz"
+    dest: /tmp/AdGuardHome.tar.gz
+    mode: '0644'
+  when: not adguard_binary.stat.exists
+
+- name: Decompresser AdGuard Home
+  ansible.builtin.unarchive:
+    src: /tmp/AdGuardHome.tar.gz
+    dest: /opt
+    remote_src: true
+    creates: "{{ adguard_install_dir }}/AdGuardHome"
+  when: not adguard_binary.stat.exists
+
+- name: Nettoyer l'archive
+  ansible.builtin.file:
+    path: /tmp/AdGuardHome.tar.gz
+    state: absent
+
+- name: Verifier si AdGuardHome.yaml existe deja
+  ansible.builtin.stat:
+    path: "{{ adguard_install_dir }}/AdGuardHome.yaml"
+  register: adguard_config
+
+- name: Generer le hash bcrypt du mot de passe admin
+  ansible.builtin.shell:
+    cmd: |
+      python3 -c "import bcrypt; print(bcrypt.hashpw(b'{{ adguard_admin_password }}', bcrypt.gensalt()).decode())"
+  register: bcrypt_hash
+  changed_when: false
+  when: not adguard_config.stat.exists
+
+- name: Deployer la configuration AdGuard Home
+  ansible.builtin.template:
+    src: AdGuardHome.yaml.j2
+    dest: "{{ adguard_install_dir }}/AdGuardHome.yaml"
+    owner: root
+    group: root
+    mode: '0640'
+  when: not adguard_config.stat.exists
+  notify: restart adguard
+
+- name: Installer AdGuard Home comme service systemd
+  ansible.builtin.command:
+    cmd: "{{ adguard_install_dir }}/AdGuardHome -s install"
+    creates: /etc/systemd/system/AdGuardHome.service
+
+- name: Activer et demarrer AdGuard Home
+  ansible.builtin.systemd:
+    name: AdGuardHome
+    state: started
+    enabled: true
+    daemon_reload: true

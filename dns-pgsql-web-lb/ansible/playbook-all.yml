@@ -1,0 +1,8 @@
+---
+# =============================================================================
+# Playbook unifie : deploie DNS + PostgreSQL
+# =============================================================================
+
+- import_playbook: playbook-dns.yml
+
+- import_playbook: playbook-db.yml

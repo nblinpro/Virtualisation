@@ -1,0 +1,214 @@
+<?php
+// =============================================================================
+// WebApp - Projet Virtualisation M1
+// Demo cluster web HA avec persistence PostgreSQL
+// Servi par : {{ ansible_hostname }} ({{ ansible_default_ipv4.address | default('?') }})
+// =============================================================================
+
+// Connexion BDD
+$dbHost = "{{ db_host }}";
+$dbPort = "{{ db_port }}";
+$dbName = "{{ db_name }}";
+$dbUser = "{{ db_user }}";
+$dbPass = "{{ db_password }}";
+
+// Identification du serveur backend
+$serverName = "{{ ansible_hostname }}";
+$serverIp   = "{{ ansible_default_ipv4.address | default('?') }}";
+
+$message = "";
+$messageType = "info";
+
+try {
+    $dsn = "pgsql:host={$dbHost};port={$dbPort};dbname={$dbName}";
+    $pdo = new PDO($dsn, $dbUser, $dbPass, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_TIMEOUT => 5,
+    ]);
+
+    // Creer la table si elle n'existe pas
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS messages (
+            id SERIAL PRIMARY KEY,
+            author VARCHAR(100) NOT NULL,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            served_by VARCHAR(100)
+        )
+    ");
+
+    // Traitement du formulaire
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $author = trim($_POST['author'] ?? '');
+        $content = trim($_POST['content'] ?? '');
+
+        if (!empty($author) && !empty($content)) {
+            $stmt = $pdo->prepare("
+                INSERT INTO messages (author, content, served_by)
+                VALUES (:author, :content, :served_by)
+            ");
+            $stmt->execute([
+                ':author'    => $author,
+                ':content'   => $content,
+                ':served_by' => $serverName,
+            ]);
+            $message = "Message ajoute avec succes par {$serverName} !";
+            $messageType = "success";
+        } else {
+            $message = "Auteur et contenu sont requis";
+            $messageType = "error";
+        }
+    }
+
+    // Recuperer les 10 derniers messages
+    $stmt = $pdo->query("
+        SELECT id, author, content, created_at, served_by
+        FROM messages
+        ORDER BY created_at DESC
+        LIMIT 10
+    ");
+    $messages = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Compter le total
+    $totalStmt = $pdo->query("SELECT COUNT(*) as total FROM messages");
+    $total = $totalStmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+    $dbStatus = "OK (PostgreSQL connecte)";
+    $dbStatusClass = "ok";
+
+} catch (PDOException $e) {
+    $dbStatus = "ERREUR : " . $e->getMessage();
+    $dbStatusClass = "error";
+    $messages = [];
+    $total = 0;
+}
+?>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>WebApp HA - {{ ansible_hostname }}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            max-width: 800px;
+            margin: 2em auto;
+            padding: 1em;
+            background: #f5f5f7;
+        }
+        .server-info {
+            background: #1d1d1f;
+            color: #fff;
+            padding: 1em 1.5em;
+            border-radius: 12px;
+            margin-bottom: 1.5em;
+        }
+        .server-info h1 { margin: 0 0 0.3em 0; font-size: 1.4em; }
+        .server-info .meta { font-size: 0.9em; color: #aaa; }
+        .status { display: inline-block; padding: 0.2em 0.6em; border-radius: 6px; font-weight: 600; }
+        .status.ok { background: #34c759; color: #fff; }
+        .status.error { background: #ff3b30; color: #fff; }
+        .card {
+            background: #fff;
+            padding: 1.5em;
+            border-radius: 12px;
+            margin-bottom: 1em;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        h2 { margin-top: 0; }
+        .form-row { margin-bottom: 1em; }
+        label { display: block; margin-bottom: 0.3em; font-weight: 600; }
+        input, textarea {
+            width: 100%;
+            padding: 0.6em;
+            border: 1px solid #d2d2d7;
+            border-radius: 8px;
+            font-size: 1em;
+            box-sizing: border-box;
+        }
+        button {
+            background: #007aff;
+            color: #fff;
+            border: 0;
+            padding: 0.7em 1.5em;
+            border-radius: 8px;
+            font-size: 1em;
+            cursor: pointer;
+        }
+        button:hover { background: #0051d5; }
+        .alert {
+            padding: 0.8em 1em;
+            border-radius: 8px;
+            margin-bottom: 1em;
+        }
+        .alert.success { background: #d4f4dd; color: #0a5d2f; }
+        .alert.error { background: #ffd6d3; color: #8b1414; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 0.6em; text-align: left; border-bottom: 1px solid #e0e0e0; }
+        th { background: #f5f5f7; }
+        .tag { font-size: 0.75em; padding: 0.1em 0.4em; border-radius: 4px; background: #e0e7ff; color: #3730a3; }
+    </style>
+</head>
+<body>
+    <div class="server-info">
+        <h1>WebApp HA - Cluster Demo</h1>
+        <div class="meta">
+            Servi par : <strong><?= htmlspecialchars($serverName) ?></strong>
+            (<?= htmlspecialchars($serverIp) ?>)
+            | BDD : <span class="status <?= $dbStatusClass ?>"><?= htmlspecialchars($dbStatus) ?></span>
+            | Total messages : <strong><?= $total ?></strong>
+        </div>
+    </div>
+
+    <?php if ($message): ?>
+        <div class="alert <?= htmlspecialchars($messageType) ?>"><?= htmlspecialchars($message) ?></div>
+    <?php endif; ?>
+
+    <div class="card">
+        <h2>Ajouter un message</h2>
+        <form method="post">
+            <div class="form-row">
+                <label for="author">Auteur</label>
+                <input type="text" id="author" name="author" required maxlength="100">
+            </div>
+            <div class="form-row">
+                <label for="content">Message</label>
+                <textarea id="content" name="content" required rows="3" maxlength="500"></textarea>
+            </div>
+            <button type="submit">Envoyer</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>Derniers messages (10 plus recents)</h2>
+        <?php if (empty($messages)): ?>
+            <p>Aucun message pour l'instant. Soyez le premier !</p>
+        <?php else: ?>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Auteur</th>
+                        <th>Message</th>
+                        <th>Servi par</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($messages as $m): ?>
+                        <tr>
+                            <td><?= htmlspecialchars($m['created_at']) ?></td>
+                            <td><strong><?= htmlspecialchars($m['author']) ?></strong></td>
+                            <td><?= htmlspecialchars($m['content']) ?></td>
+                            <td><span class="tag"><?= htmlspecialchars($m['served_by']) ?></span></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+    </div>
+
+    <p style="text-align: center; color: #86868b; font-size: 0.85em;">
+        Projet Virtualisation M1 - Datacenter Prive HA
+    </p>
+</body>
+</html>

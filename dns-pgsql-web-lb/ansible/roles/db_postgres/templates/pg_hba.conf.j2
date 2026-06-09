@@ -1,0 +1,27 @@
+# =============================================================================
+# PostgreSQL Client Authentication Configuration
+# Genere par Ansible le {{ ansible_date_time.iso8601 }}
+# Projet Virtualisation M1
+# =============================================================================
+# TYPE  DATABASE        USER            ADDRESS                 METHOD
+
+# Acces local (Unix socket)
+local   all             postgres                                peer
+local   all             all                                     peer
+
+# Acces local TCP (loopback)
+host    all             all             127.0.0.1/32            scram-sha-256
+host    all             all             ::1/128                 scram-sha-256
+
+# Replication
+local   replication     all                                     peer
+host    replication     all             127.0.0.1/32            scram-sha-256
+host    replication     all             ::1/128                 scram-sha-256
+
+# =============================================================================
+# Acces reseau autorise (subnets internes)
+# =============================================================================
+{% for entry in postgres_allowed_subnets %}
+# {{ entry.comment | default('Subnet autorise') }}
+host    {{ entry.db }}             {{ entry.user }}             {{ entry.source }}            {{ entry.method }}
+{% endfor %}
