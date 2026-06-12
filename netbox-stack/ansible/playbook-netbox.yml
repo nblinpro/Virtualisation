@@ -1,0 +1,70 @@
+---
+- name: Deploiement de NetBox sur netbox-01
+  hosts: netbox
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Attendre la connectivite SSH
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 120
+
+    - name: Mise a jour APT
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Installer collection community.postgresql (si manquante)
+      ansible.builtin.command:
+        cmd: ansible-galaxy collection install community.postgresql
+      delegate_to: localhost
+      become: false
+      run_once: true
+      changed_when: false
+      failed_when: false
+
+  roles:
+    - netbox
+
+  post_tasks:
+    - name: Verifier que les services sont actifs
+      ansible.builtin.command: systemctl is-active {{ item }}
+      register: svc_status
+      changed_when: false
+      failed_when: false
+      loop:
+        - postgresql
+        - redis-server
+        - netbox
+        - netbox-rq
+        - nginx
+
+    - name: Statut des services
+      ansible.builtin.debug:
+        msg: "{{ item.item }} : {{ item.stdout }}"
+      loop: "{{ svc_status.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Tester l'acces HTTP a NetBox
+      ansible.builtin.uri:
+        url: "http://10.0.20.30/login/"
+        return_content: false
+        status_code: 200
+      register: netbox_check
+      retries: 5
+      delay: 10
+      until: netbox_check.status == 200
+      failed_when: false
+
+    - name: Resume final
+      ansible.builtin.debug:
+        msg:
+          - "===================================="
+          - "NetBox deploye avec succes !"
+          - "===================================="
+          - "URL    : http://10.0.20.30"
+          - "User   : admin"
+          - "Pass   : Ynov2026!"
+          - "===================================="

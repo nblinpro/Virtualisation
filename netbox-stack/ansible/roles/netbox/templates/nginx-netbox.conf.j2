@@ -1,0 +1,22 @@
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    server_name netbox-01.infra.lan netbox.infra.lan 10.0.20.30 _;
+
+    client_max_body_size 25m;
+
+    # Fichiers statiques NetBox (NetBox 4.x utilise static/ pas staticfiles/)
+    location /static/ {
+        alias {{ netbox_install_dir }}/netbox/static/;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:{{ netbox_gunicorn_port }};
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host $http_host;
+    }
+}

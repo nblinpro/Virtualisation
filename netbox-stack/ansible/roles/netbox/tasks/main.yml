@@ -1,0 +1,393 @@
+---
+# =============================================================================
+# Role netbox - Installation NetBox (Django + PostgreSQL + Redis + Nginx)
+# Version 1.1 - Inclut tous les fixes pour LXC Debian 13
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. PAQUETS DE BASE
+# -----------------------------------------------------------------------------
+- name: Installer les dependances systeme
+  ansible.builtin.apt:
+    name:
+      - sudo
+      - curl
+      - wget
+      - git
+      - ca-certificates
+      - acl
+      - python3
+      - python3-pip
+      - python3-venv
+      - python3-dev
+      - build-essential
+      - libxml2-dev
+      - libxslt1-dev
+      - libffi-dev
+      - libpq-dev
+      - libssl-dev
+      - zlib1g-dev
+      - postgresql
+      - postgresql-client
+      - python3-psycopg2
+      - redis-server
+      - nginx
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# -----------------------------------------------------------------------------
+# 2. POSTGRESQL
+# -----------------------------------------------------------------------------
+- name: Demarrer et activer PostgreSQL
+  ansible.builtin.systemd:
+    name: postgresql
+    state: started
+    enabled: true
+
+- name: Creer l'utilisateur PostgreSQL netbox
+  community.postgresql.postgresql_user:
+    name: "{{ netbox_db_user }}"
+    password: "{{ netbox_db_password }}"
+    state: present
+  become: true
+  become_user: postgres
+
+# IMPORTANT : template0 obligatoire car template1 sur Debian 13 LXC est en SQL_ASCII
+- name: Creer la base de donnees netbox (FIX UTF-8 sur Debian 13 LXC)
+  community.postgresql.postgresql_db:
+    name: "{{ netbox_db_name }}"
+    owner: "{{ netbox_db_user }}"
+    encoding: UTF-8
+    lc_collate: C.UTF-8
+    lc_ctype: C.UTF-8
+    template: template0
+    state: present
+  become: true
+  become_user: postgres
+
+- name: Donner les droits sur la base netbox
+  community.postgresql.postgresql_privs:
+    database: "{{ netbox_db_name }}"
+    role: "{{ netbox_db_user }}"
+    type: database
+    privs: ALL
+    state: present
+  become: true
+  become_user: postgres
+
+# -----------------------------------------------------------------------------
+# 3. REDIS (FIX LXC : service systemd custom)
+# -----------------------------------------------------------------------------
+- name: S'assurer que l'utilisateur redis existe (FIX LXC postinst silencieux)
+  ansible.builtin.user:
+    name: redis
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+    home: /var/lib/redis
+    state: present
+
+- name: Creer les dossiers redis avec bonnes permissions
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: redis
+    group: redis
+    mode: '0750'
+  loop:
+    - /var/lib/redis
+    - /var/log/redis
+    - /run/redis
+
+- name: Deployer service systemd Redis LXC-friendly (FIX 217/USER + 226/NAMESPACE)
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/redis-server.service
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Advanced key-value store (LXC-friendly)
+      After=network.target
+      Documentation=http://redis.io/documentation
+
+      [Service]
+      Type=notify
+      User=redis
+      Group=redis
+      ExecStartPre=/bin/mkdir -p /run/redis
+      ExecStartPre=/bin/chown redis:redis /run/redis
+      ExecStart=/usr/bin/redis-server /etc/redis/redis.conf --supervised systemd --daemonize no
+      PIDFile=/run/redis/redis-server.pid
+      TimeoutStopSec=0
+      Restart=always
+      ExecStop=/bin/kill -s TERM $MAINPID
+
+      [Install]
+      WantedBy=multi-user.target
+      Alias=redis.service
+  notify: restart redis
+
+- name: Forcer reload systemd apres modif du service Redis
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Activer et demarrer Redis
+  ansible.builtin.systemd:
+    name: redis-server
+    state: started
+    enabled: true
+
+- name: Test Redis (doit repondre PONG)
+  ansible.builtin.command: redis-cli ping
+  register: redis_ping
+  changed_when: false
+  retries: 3
+  delay: 2
+  until: "'PONG' in redis_ping.stdout"
+
+# -----------------------------------------------------------------------------
+# 4. UTILISATEUR SYSTEME NETBOX
+# -----------------------------------------------------------------------------
+- name: Creer le groupe netbox
+  ansible.builtin.group:
+    name: "{{ netbox_group }}"
+    state: present
+    system: true
+
+- name: Creer l'utilisateur netbox
+  ansible.builtin.user:
+    name: "{{ netbox_user }}"
+    group: "{{ netbox_group }}"
+    home: "{{ netbox_data_dir }}"
+    shell: /bin/bash
+    system: true
+    create_home: true
+
+# -----------------------------------------------------------------------------
+# 5. GIT SAFE.DIRECTORY (FIX dubious ownership)
+# -----------------------------------------------------------------------------
+- name: Configurer Git safe.directory pour NetBox
+  ansible.builtin.command:
+    cmd: git config --global --add safe.directory {{ netbox_install_dir }}
+  changed_when: false
+
+# -----------------------------------------------------------------------------
+# 6. TELECHARGEMENT NETBOX
+# -----------------------------------------------------------------------------
+- name: Verifier si NetBox est deja installe
+  ansible.builtin.stat:
+    path: "{{ netbox_install_dir }}/manage.py"
+  register: netbox_installed
+
+- name: Telecharger NetBox {{ netbox_version }}
+  ansible.builtin.git:
+    repo: "https://github.com/netbox-community/netbox.git"
+    dest: "{{ netbox_install_dir }}"
+    version: "{{ netbox_version }}"
+    depth: 1
+  when: not netbox_installed.stat.exists
+
+- name: Definir le proprietaire de NetBox
+  ansible.builtin.file:
+    path: "{{ netbox_install_dir }}"
+    owner: "{{ netbox_user }}"
+    group: "{{ netbox_group }}"
+    recurse: true
+
+# -----------------------------------------------------------------------------
+# 7. ENVIRONNEMENT PYTHON VIRTUEL
+# -----------------------------------------------------------------------------
+- name: Creer le virtualenv Python
+  ansible.builtin.command:
+    cmd: python3 -m venv {{ netbox_install_dir }}/venv
+    creates: "{{ netbox_install_dir }}/venv/bin/python3"
+  become: true
+  become_user: "{{ netbox_user }}"
+
+- name: Mettre a jour pip dans le venv
+  ansible.builtin.pip:
+    name:
+      - pip
+      - setuptools
+      - wheel
+    state: latest
+    virtualenv: "{{ netbox_install_dir }}/venv"
+    virtualenv_command: python3 -m venv
+  become: true
+  become_user: "{{ netbox_user }}"
+
+- name: Installer les dependances Python de NetBox (peut prendre 5-10 min)
+  ansible.builtin.pip:
+    requirements: "{{ netbox_install_dir }}/requirements.txt"
+    virtualenv: "{{ netbox_install_dir }}/venv"
+  become: true
+  become_user: "{{ netbox_user }}"
+
+# -----------------------------------------------------------------------------
+# 8. CONFIGURATION NETBOX
+# -----------------------------------------------------------------------------
+- name: Deployer la configuration NetBox
+  ansible.builtin.template:
+    src: configuration.py.j2
+    dest: "{{ netbox_install_dir }}/netbox/netbox/configuration.py"
+    owner: "{{ netbox_user }}"
+    group: "{{ netbox_group }}"
+    mode: '0640'
+  notify:
+    - restart netbox
+    - restart netbox-rq
+
+- name: Creer les dossiers media/reports/scripts
+  ansible.builtin.file:
+    path: "{{ netbox_install_dir }}/netbox/{{ item }}"
+    state: directory
+    owner: "{{ netbox_user }}"
+    group: "{{ netbox_group }}"
+    mode: '0755'
+  loop:
+    - media
+    - reports
+    - scripts
+
+# -----------------------------------------------------------------------------
+# 9. INITIALISATION DE LA BASE
+# -----------------------------------------------------------------------------
+- name: Migrer la base de donnees NetBox
+  ansible.builtin.command:
+    cmd: "{{ netbox_install_dir }}/venv/bin/python manage.py migrate"
+    chdir: "{{ netbox_install_dir }}/netbox"
+  become: true
+  become_user: "{{ netbox_user }}"
+  register: migrate_result
+  changed_when: "'No migrations to apply' not in migrate_result.stdout"
+
+# IMPORTANT : NetBox 4.x utilise STATIC_ROOT relatif = static/ pas staticfiles/
+- name: Collecter les fichiers statiques (NetBox 4.x utilise static/)
+  ansible.builtin.command:
+    cmd: "{{ netbox_install_dir }}/venv/bin/python manage.py collectstatic --no-input"
+    chdir: "{{ netbox_install_dir }}/netbox"
+  become: true
+  become_user: "{{ netbox_user }}"
+  register: collectstatic_result
+  changed_when: "'copied to' in collectstatic_result.stdout"
+
+# FIX NetBox 4.x : 'users.User' au lieu de 'django.contrib.auth.models.User'
+- name: Verifier si superuser existe (FIX NetBox 4.x - users.models)
+  ansible.builtin.command:
+    cmd: >
+      {{ netbox_install_dir }}/venv/bin/python manage.py shell -c
+      "from users.models import User; print(User.objects.filter(username='{{ netbox_admin_user }}').exists())"
+    chdir: "{{ netbox_install_dir }}/netbox"
+  become: true
+  become_user: "{{ netbox_user }}"
+  register: superuser_check
+  changed_when: false
+
+- name: Creer le superuser NetBox (FIX NetBox 4.x - users.models)
+  ansible.builtin.shell:
+    cmd: >
+      echo "from users.models import User;
+      User.objects.create_superuser('{{ netbox_admin_user }}', '{{ netbox_admin_email }}', '{{ netbox_admin_password }}')" |
+      {{ netbox_install_dir }}/venv/bin/python manage.py shell
+    chdir: "{{ netbox_install_dir }}/netbox"
+  become: true
+  become_user: "{{ netbox_user }}"
+  when: "'False' in superuser_check.stdout"
+
+# -----------------------------------------------------------------------------
+# 10. PERMISSIONS POUR NGINX (FIX 403/404 sur static files)
+# -----------------------------------------------------------------------------
+- name: Permissions traversee pour Nginx (FIX 403)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    mode: 'o+x'
+    state: directory
+  loop:
+    - /opt
+    - "{{ netbox_install_dir }}"
+    - "{{ netbox_install_dir }}/netbox"
+
+- name: Permissions lecture sur fichiers statiques (FIX static 404)
+  ansible.builtin.shell:
+    cmd: |
+      find {{ netbox_install_dir }}/netbox/static -type d -exec chmod o+rx {} \;
+      find {{ netbox_install_dir }}/netbox/static -type f -exec chmod o+r {} \;
+  changed_when: false
+  failed_when: false
+
+# -----------------------------------------------------------------------------
+# 11. SERVICES SYSTEMD NETBOX
+# -----------------------------------------------------------------------------
+- name: Deployer la config gunicorn
+  ansible.builtin.template:
+    src: gunicorn.py.j2
+    dest: "{{ netbox_install_dir }}/gunicorn.py"
+    owner: "{{ netbox_user }}"
+    group: "{{ netbox_group }}"
+    mode: '0644'
+  notify: restart netbox
+
+- name: Deployer le service systemd netbox
+  ansible.builtin.template:
+    src: netbox.service.j2
+    dest: /etc/systemd/system/netbox.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart netbox
+
+- name: Deployer le service systemd netbox-rq
+  ansible.builtin.template:
+    src: netbox-rq.service.j2
+    dest: /etc/systemd/system/netbox-rq.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart netbox-rq
+
+- name: Activer et demarrer netbox + netbox-rq
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  loop:
+    - netbox
+    - netbox-rq
+
+# -----------------------------------------------------------------------------
+# 12. NGINX (FIX alias sur static/ et non staticfiles/)
+# -----------------------------------------------------------------------------
+- name: Supprimer la config Nginx default
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: reload nginx
+
+- name: Deployer la config Nginx pour NetBox (FIX path static/)
+  ansible.builtin.template:
+    src: nginx-netbox.conf.j2
+    dest: /etc/nginx/sites-available/netbox
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload nginx
+
+- name: Activer le site netbox
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/netbox
+    dest: /etc/nginx/sites-enabled/netbox
+    state: link
+  notify: reload nginx
+
+- name: Activer et demarrer Nginx
+  ansible.builtin.systemd:
+    name: nginx
+    state: started
+    enabled: true

@@ -1,0 +1,39 @@
+---
+# =============================================================================
+# Role netbox - Variables par defaut
+# =============================================================================
+
+# Version de NetBox
+netbox_version: "v4.1.5"
+netbox_install_dir: "/opt/netbox"
+netbox_data_dir: "/opt/netbox-data"
+netbox_user: "netbox"
+netbox_group: "netbox"
+
+# PostgreSQL
+netbox_db_name: "netbox"
+netbox_db_user: "netbox"
+netbox_db_password: "NetBox2026!Db"
+netbox_db_host: "localhost"
+netbox_db_port: 5432
+
+# Redis
+netbox_redis_host: "localhost"
+netbox_redis_port: 6379
+
+# Application
+netbox_secret_key: "ChangeMePleaseNetBoxYnov2026SuperSecretKey50CharsMinimum"
+netbox_admin_user: "admin"
+netbox_admin_password: "Ynov2026!"
+netbox_admin_email: "admin@infra.lan"
+
+# Hosts autorises (pour Django ALLOWED_HOSTS)
+netbox_allowed_hosts:
+  - "10.0.20.30"
+  - "netbox-01"
+  - "netbox-01.infra.lan"
+  - "netbox.infra.lan"
+  - "*"  # Lab uniquement, retirer en prod
+
+# Port Gunicorn local
+netbox_gunicorn_port: 8001

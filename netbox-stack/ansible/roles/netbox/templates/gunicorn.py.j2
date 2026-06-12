@@ -1,0 +1,8 @@
+# Gunicorn configuration for NetBox
+
+bind = '127.0.0.1:{{ netbox_gunicorn_port }}'
+workers = 3
+threads = 3
+timeout = 120
+max_requests = 5000
+max_requests_jitter = 500
