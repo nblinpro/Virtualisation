@@ -1,0 +1,71 @@
+---
+# =============================================================================
+# Defaults - nas_samba
+# Serveur de fichiers Samba pour le NAS
+# =============================================================================
+
+# Workgroup Windows (compatibilite client)
+samba_workgroup: "YNOV"
+samba_server_string: "NAS Ynov (Samba %v)"
+samba_netbios_name: "NAS-YNOV"
+
+# Repertoire racine des partages
+samba_shares_root: "/srv/shares"
+
+# Reseaux autorises a se connecter (RFC 1918 internes)
+samba_allowed_networks:
+  - "10.0.0.0/8"
+  - "192.168.0.0/16"
+  - "127.0.0.0/8"
+
+# Utilisateurs Samba
+# password : mot de passe Samba (hash genere par smbpasswd)
+samba_users:
+  - { name: "ynov",     password: "Ynov2026!",      uid: 2001, gid: 2001, fullname: "Utilisateur Ynov" }
+  - { name: "nasadmin", password: "NasAdmin2026!",  uid: 2002, gid: 2002, fullname: "Admin NAS" }
+
+# Definition des shares
+# Chaque share aura son dossier sous {{ samba_shares_root }}/{name}
+samba_shares:
+  - name: "public"
+    comment: "Partage public - lecture seule"
+    path: "/srv/shares/public"
+    browsable: "yes"
+    writable: "no"
+    guest_ok: "yes"
+    public: "yes"
+    force_user: "nobody"
+    force_group: "nogroup"
+    create_mask: "0644"
+    directory_mask: "0755"
+    permissions: "0755"
+    owner: "nobody"
+    group: "nogroup"
+
+  - name: "documents"
+    comment: "Documents partages - lecture/ecriture authentifiee"
+    path: "/srv/shares/documents"
+    browsable: "yes"
+    writable: "yes"
+    guest_ok: "no"
+    valid_users: "ynov nasadmin"
+    write_list: "ynov nasadmin"
+    create_mask: "0664"
+    directory_mask: "0775"
+    permissions: "2775"
+    owner: "root"
+    group: "samba-users"
+
+  - name: "backups"
+    comment: "Depot de sauvegardes - admin uniquement"
+    path: "/srv/shares/backups"
+    browsable: "no"
+    writable: "yes"
+    guest_ok: "no"
+    valid_users: "nasadmin"
+    write_list: "nasadmin"
+    create_mask: "0600"
+    directory_mask: "0700"
+    permissions: "0700"
+    owner: "nasadmin"
+    group: "nasadmin"

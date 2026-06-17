@@ -1,0 +1,164 @@
+---
+# =============================================================================
+# Role nas_samba - Installation et configuration Samba sur Debian 13 LXC
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. PAQUETS
+# -----------------------------------------------------------------------------
+- name: "Installer Samba et utilitaires"
+  ansible.builtin.apt:
+    name:
+      - samba
+      - samba-common-bin
+      - smbclient
+      - acl
+      - sudo
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# -----------------------------------------------------------------------------
+# 2. GROUPE COMMUN POUR LES UTILISATEURS SAMBA
+# -----------------------------------------------------------------------------
+- name: "Creer le groupe samba-users"
+  ansible.builtin.group:
+    name: samba-users
+    gid: 2000
+    state: present
+
+# -----------------------------------------------------------------------------
+# 3. UTILISATEURS LINUX (pour Samba)
+# -----------------------------------------------------------------------------
+- name: "Creer les groupes individuels pour chaque utilisateur Samba"
+  ansible.builtin.group:
+    name: "{{ item.name }}"
+    gid: "{{ item.gid }}"
+    state: present
+  loop: "{{ samba_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: "Creer les utilisateurs Linux pour Samba"
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    uid: "{{ item.uid }}"
+    group: "{{ item.name }}"
+    groups: "samba-users"
+    comment: "{{ item.fullname | default(item.name) }}"
+    shell: /usr/sbin/nologin
+    create_home: false
+    state: present
+  loop: "{{ samba_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: "Definir mots de passe Samba (smbpasswd)"
+  ansible.builtin.shell:
+    cmd: |
+      (echo "{{ item.password }}"; echo "{{ item.password }}") | smbpasswd -a -s {{ item.name }}
+  loop: "{{ samba_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: smbpasswd_result
+  changed_when: "'Added user' in smbpasswd_result.stdout or 'New SMB password' in smbpasswd_result.stdout"
+  failed_when: false
+
+- name: "Activer les utilisateurs Samba"
+  ansible.builtin.command:
+    cmd: smbpasswd -e {{ item.name }}
+  loop: "{{ samba_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false
+  failed_when: false
+
+# -----------------------------------------------------------------------------
+# 4. ARBORESCENCE DES SHARES
+# -----------------------------------------------------------------------------
+- name: "Creer le dossier racine des shares"
+  ansible.builtin.file:
+    path: "{{ samba_shares_root }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: "Creer chaque dossier de share"
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('samba-users') }}"
+    mode: "{{ item.permissions | default('0755') }}"
+  loop: "{{ samba_shares }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# -----------------------------------------------------------------------------
+# 5. CONFIGURATION SAMBA
+# -----------------------------------------------------------------------------
+- name: "Deployer smb.conf"
+  ansible.builtin.template:
+    src: smb.conf.j2
+    dest: /etc/samba/smb.conf
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  notify: restart samba
+
+- name: "Tester la syntaxe smb.conf"
+  ansible.builtin.command:
+    cmd: testparm -s
+  register: testparm_result
+  changed_when: false
+  failed_when: testparm_result.rc != 0
+
+# -----------------------------------------------------------------------------
+# 6. SERVICES SYSTEMD
+# -----------------------------------------------------------------------------
+# Note : pas de nmbd (NetBIOS broadcast) car LXC unprivileged limite
+# On garde uniquement smbd qui suffit pour les acces directs par IP/nom DNS
+
+- name: "Activer et demarrer smbd"
+  ansible.builtin.systemd:
+    name: smbd
+    state: started
+    enabled: true
+
+- name: "Verifier que smbd ecoute sur 445"
+  ansible.builtin.wait_for:
+    port: 445
+    host: 127.0.0.1
+    timeout: 30
+
+# -----------------------------------------------------------------------------
+# 7. AJOUTER UN README DANS PUBLIC
+# -----------------------------------------------------------------------------
+- name: "Creer un README dans le share public"
+  ansible.builtin.copy:
+    dest: "/srv/shares/public/README.txt"
+    content: |
+      ====================================
+      NAS Ynov - Serveur de fichiers Samba
+      ====================================
+
+      Partages disponibles :
+        - public     : Lecture seule, acces invite
+        - documents  : Lecture/ecriture, authentifie (ynov, nasadmin)
+        - backups    : Admin uniquement (nasadmin)
+
+      Acces Windows :
+        \\10.0.99.10\public
+        \\10.0.99.10\documents
+
+      Acces Linux/Mac :
+        smb://10.0.99.10/public
+        smb://10.0.99.10/documents
+
+      Servi par : Samba sur nas-01 (10.0.99.10)
+      VLAN      : 99 BACKUP
+    owner: nobody
+    group: nogroup
+    mode: '0644'

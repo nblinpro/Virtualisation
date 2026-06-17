@@ -1,0 +1,52 @@
+---
+- name: "Deploiement du serveur de fichiers Samba (nas-01)"
+  hosts: nas
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: "Attendre la connectivite SSH"
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 120
+
+    - name: "Mise a jour APT"
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+  roles:
+    - nas_samba
+
+  post_tasks:
+    - name: "Verifier statut smbd"
+      ansible.builtin.command: systemctl is-active smbd
+      register: smbd_status
+      changed_when: false
+      failed_when: false
+
+    - name: "Lister les shares vus par Samba"
+      ansible.builtin.command: smbclient -L //127.0.0.1 -N
+      register: shares_list
+      changed_when: false
+      failed_when: false
+
+    - name: "Resume final"
+      ansible.builtin.debug:
+        msg:
+          - "====================================="
+          - "NAS Samba deploye avec succes !"
+          - "====================================="
+          - "Hostname  : nas-01"
+          - "IP        : 10.0.99.10"
+          - "VLAN      : 99 BACKUP"
+          - "Status    : {{ smbd_status.stdout }}"
+          - "-------------------------------------"
+          - "Shares    :"
+          - "  - public     (lecture seule, invite)"
+          - "  - documents  (auth : ynov / Ynov2026!)"
+          - "  - backups    (auth : nasadmin / NasAdmin2026!)"
+          - "-------------------------------------"
+          - "Acces Windows : \\\\10.0.99.10\\public"
+          - "Acces Linux   : smb://10.0.99.10/public"
+          - "====================================="
