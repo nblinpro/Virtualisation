@@ -1,10 +1,79 @@
 ---
-- name: Verifier si Promtail est deja installe
+# =============================================================================
+# Role promtail_client v1.1 - Avec fix LXC Debian 13 pour /dev/log
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. INSTALLER ET CONFIGURER RSYSLOG (FIX LXC /dev/log)
+# -----------------------------------------------------------------------------
+- name: "Installer rsyslog"
+  ansible.builtin.apt:
+    name: rsyslog
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: "FIX LXC - Module imuxsock pour creer /dev/log"
+  ansible.builtin.copy:
+    dest: /etc/rsyslog.d/10-imuxsock.conf
+    content: |
+      # Module socket Unix - cree /dev/log dans les LXC unprivileged
+      module(load="imuxsock"
+             SysSock.Use="on"
+             SysSock.Name="/dev/log"
+             SysSock.UsePIDFromSystem="on")
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart rsyslog
+
+- name: "FIX LXC - Config rsyslog par defaut (ecriture /var/log/syslog)"
+  ansible.builtin.copy:
+    dest: /etc/rsyslog.d/50-default.conf
+    content: |
+      # Configuration par defaut LXC
+      *.*;auth,authpriv.none          -/var/log/syslog
+      auth,authpriv.*                  /var/log/auth.log
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart rsyslog
+
+- name: "Activer et demarrer rsyslog"
+  ansible.builtin.systemd:
+    name: rsyslog
+    state: started
+    enabled: true
+
+- name: "Verifier que /dev/log existe"
+  ansible.builtin.stat:
+    path: /dev/log
+  register: dev_log_check
+
+- name: "FIX LXC - Forcer la creation de /dev/log si manquant"
+  ansible.builtin.shell:
+    cmd: |
+      systemctl restart rsyslog
+      sleep 2
+      ls -la /dev/log
+  when: not dev_log_check.stat.exists or not dev_log_check.stat.issock
+  changed_when: false
+
+- name: "Generer un log de test pour valider /dev/log"
+  ansible.builtin.command:
+    cmd: logger "rsyslog configure via Ansible le {{ ansible_date_time.iso8601 }}"
+  ignore_errors: true
+  changed_when: false
+
+# -----------------------------------------------------------------------------
+# 2. INSTALLER PROMTAIL
+# -----------------------------------------------------------------------------
+- name: "Verifier si Promtail est deja installe"
   ansible.builtin.stat:
     path: /usr/local/bin/promtail
   register: promtail_binary
 
-- name: Installer wget et unzip
+- name: "Installer wget et unzip"
   ansible.builtin.apt:
     name:
       - wget
@@ -14,21 +83,21 @@
     cache_valid_time: 3600
   when: not promtail_binary.stat.exists
 
-- name: Telecharger Promtail
+- name: "Telecharger Promtail"
   ansible.builtin.get_url:
     url: "https://github.com/grafana/loki/releases/download/v{{ promtail_version }}/promtail-linux-amd64.zip"
     dest: /tmp/promtail.zip
     mode: '0644'
   when: not promtail_binary.stat.exists
 
-- name: Decompresser Promtail
+- name: "Decompresser Promtail"
   ansible.builtin.unarchive:
     src: /tmp/promtail.zip
     dest: /tmp
     remote_src: true
   when: not promtail_binary.stat.exists
 
-- name: Installer le binaire
+- name: "Installer le binaire"
   ansible.builtin.copy:
     src: /tmp/promtail-linux-amd64
     dest: /usr/local/bin/promtail
@@ -37,7 +106,7 @@
   when: not promtail_binary.stat.exists
   notify: restart promtail
 
-- name: Nettoyer
+- name: "Nettoyer"
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
@@ -46,13 +115,22 @@
     - /tmp/promtail-linux-amd64
   when: not promtail_binary.stat.exists
 
-- name: Creer le dossier de config
+# -----------------------------------------------------------------------------
+# 3. CONFIGURER PROMTAIL
+# -----------------------------------------------------------------------------
+- name: "Creer le dossier de config Promtail"
   ansible.builtin.file:
     path: /etc/promtail
     state: directory
     mode: '0755'
 
-- name: Deployer la config Promtail
+- name: "Creer le dossier de positions Promtail"
+  ansible.builtin.file:
+    path: /var/lib/promtail
+    state: directory
+    mode: '0755'
+
+- name: "Deployer la config Promtail"
   ansible.builtin.template:
     src: promtail-config.yml.j2
     dest: /etc/promtail/config.yml
@@ -61,7 +139,7 @@
     mode: '0644'
   notify: restart promtail
 
-- name: Deployer le service systemd
+- name: "Deployer le service systemd"
   ansible.builtin.template:
     src: promtail.service.j2
     dest: /etc/systemd/system/promtail.service
@@ -70,7 +148,7 @@
     mode: '0644'
   notify: restart promtail
 
-- name: Activer et demarrer Promtail
+- name: "Activer et demarrer Promtail"
   ansible.builtin.systemd:
     name: promtail
     enabled: true

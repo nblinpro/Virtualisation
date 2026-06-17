@@ -1,0 +1,92 @@
+---
+# Installer rsyslog en premier pour que /var/log/syslog existe
+- name: "Installer rsyslog (pour ecrire /var/log/syslog)"
+  ansible.builtin.apt:
+    name: rsyslog
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: "Activer et demarrer rsyslog"
+  ansible.builtin.systemd:
+    name: rsyslog
+    state: started
+    enabled: true
+
+- name: Verifier si Promtail est deja installe
+  ansible.builtin.stat:
+    path: /usr/local/bin/promtail
+  register: promtail_binary
+
+- name: Installer wget et unzip
+  ansible.builtin.apt:
+    name:
+      - wget
+      - unzip
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: not promtail_binary.stat.exists
+
+- name: Telecharger Promtail
+  ansible.builtin.get_url:
+    url: "https://github.com/grafana/loki/releases/download/v{{ promtail_version }}/promtail-linux-amd64.zip"
+    dest: /tmp/promtail.zip
+    mode: '0644'
+  when: not promtail_binary.stat.exists
+
+- name: Decompresser Promtail
+  ansible.builtin.unarchive:
+    src: /tmp/promtail.zip
+    dest: /tmp
+    remote_src: true
+  when: not promtail_binary.stat.exists
+
+- name: Installer le binaire
+  ansible.builtin.copy:
+    src: /tmp/promtail-linux-amd64
+    dest: /usr/local/bin/promtail
+    mode: '0755'
+    remote_src: true
+  when: not promtail_binary.stat.exists
+  notify: restart promtail
+
+- name: Nettoyer
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/promtail.zip
+    - /tmp/promtail-linux-amd64
+  when: not promtail_binary.stat.exists
+
+- name: Creer le dossier de config
+  ansible.builtin.file:
+    path: /etc/promtail
+    state: directory
+    mode: '0755'
+
+- name: Deployer la config Promtail
+  ansible.builtin.template:
+    src: promtail-config.yml.j2
+    dest: /etc/promtail/config.yml
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart promtail
+
+- name: Deployer le service systemd
+  ansible.builtin.template:
+    src: promtail.service.j2
+    dest: /etc/systemd/system/promtail.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart promtail
+
+- name: Activer et demarrer Promtail
+  ansible.builtin.systemd:
+    name: promtail
+    enabled: true
+    state: started
+    daemon_reload: true

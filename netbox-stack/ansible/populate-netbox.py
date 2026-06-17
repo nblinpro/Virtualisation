@@ -38,7 +38,7 @@ except ImportError:
 # CONFIGURATION
 # =============================================================================
 NETBOX_URL = os.environ.get("NETBOX_URL", "http://10.0.20.30")
-NETBOX_TOKEN = os.environ.get("NETBOX_TOKEN", "4d7b82a7b740ebac40ecc9dd6ebc9a050b276b34")
+NETBOX_TOKEN = os.environ.get("NETBOX_TOKEN", "3abc8f40078b54e47e59af75b6ab6d7b6949bc00")
 
 if not NETBOX_TOKEN:
     print("ERREUR : NETBOX_TOKEN manquant")

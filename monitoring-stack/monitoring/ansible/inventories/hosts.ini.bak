@@ -1,30 +1,20 @@
 # =============================================================================
-# Inventaire Ansible - Monitoring (mis a jour)
+# Inventaire Ansible - Monitoring
 # =============================================================================
 
 # Serveur monitoring (Prometheus + Grafana + Loki + Promtail local)
 [monitoring_server]
 monitoring-01 ansible_host=10.0.60.10
 
-# Cibles a scraper avec node_exporter + Promtail
+# Cibles a scraper avec node_exporter
 [node_exporter_targets]
-# DNS
-dns-rec-01   ansible_host=10.0.20.10
-dns-auth-01  ansible_host=10.0.20.11
-# Services internes
-glpi-01      ansible_host=10.0.20.50
-netbox-01    ansible_host=10.0.20.30
-# Base de donnees
-pgsql-01     ansible_host=10.0.50.10
-# Cluster web
-web-01       ansible_host=10.0.40.11
-web-02       ansible_host=10.0.40.12
-web-03       ansible_host=10.0.40.13
-# Load balancers
-lb-01        ansible_host=10.0.10.11
-lb-02        ansible_host=10.0.10.12
-# NAS
-nas-01       ansible_host=10.0.99.10
+dns-01     ansible_host=10.0.20.10
+pgsql-01   ansible_host=10.0.50.10
+web-01     ansible_host=10.0.40.11
+web-02     ansible_host=10.0.40.12
+web-03     ansible_host=10.0.40.13
+lb-01      ansible_host=10.0.10.11
+lb-02      ansible_host=10.0.10.12
 
 # Hyperviseurs Proxmox (pve-exporter)
 [pve_hosts]
