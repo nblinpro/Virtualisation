@@ -1,0 +1,36 @@
+---
+- name: "Phase 2 - HAProxy HTTPS avec cert step-ca"
+  hosts: loadbalancers
+  become: true
+  gather_facts: true
+  serial: 1
+
+  pre_tasks:
+    - name: "Attendre la connectivite SSH"
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 120
+
+  roles:
+    - haproxy_https
+
+  post_tasks:
+    - name: "Test final HTTPS via VIP"
+      ansible.builtin.command:
+        cmd: curl -s --cacert /etc/haproxy/certs/root_ca.crt https://10.0.10.100 -o /dev/null -w "%{http_code}"
+      register: vip_https_test
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname == "lb-01"
+
+    - name: "Resume final HTTPS"
+      ansible.builtin.debug:
+        msg:
+          - "==========================================="
+          - "HTTPS deploye sur {{ inventory_hostname }}"
+          - "==========================================="
+          - "VIP HTTPS : https://10.0.10.100"
+          - "Cert      : /etc/haproxy/certs/web.pem"
+          - "Root CA   : /etc/haproxy/certs/root_ca.crt"
+          - "Test VIP  : HTTP {{ vip_https_test.stdout | default('skipped') }}"
+          - "==========================================="

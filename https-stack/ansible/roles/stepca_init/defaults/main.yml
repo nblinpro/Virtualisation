@@ -1,0 +1,33 @@
+---
+# =============================================================================
+# Defaults - stepca_init v1.2
+# =============================================================================
+
+# Nom et organization de la CA
+stepca_name: "Ynov Lab CA"
+
+# DNS et IPs autorises dans le cert de la CA elle-meme
+stepca_dns_names:
+  - "step-ca.infra.lan"
+  - "ca.infra.lan"
+  - "lb-01.infra.lan"
+  - "lb-01"
+  - "10.0.10.11"
+
+# Adresse d'ecoute step-ca (:8443 = toutes interfaces - obligatoire)
+stepca_address: ":8443"
+
+# Provisioner (compte de service pour emettre des certs)
+stepca_provisioner_name: "admin@infra.lan"
+
+# Mot de passe step-ca (modifier en prod)
+stepca_password: "StepCa2026YnovChangeMe!"
+
+# Repertoire d'installation
+stepca_dir: "/root/.step"
+stepca_user: "root"
+
+# Claims TLS - duree max autorisee pour les certs emis (90 jours)
+stepca_min_tls_duration: "5m"
+stepca_max_tls_duration: "2160h"
+stepca_default_tls_duration: "2160h"

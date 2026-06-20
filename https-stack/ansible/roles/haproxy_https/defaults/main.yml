@@ -1,0 +1,38 @@
+---
+# =============================================================================
+# Defaults - haproxy_https v1.2
+# =============================================================================
+
+# VIP du cluster web (Keepalived)
+haproxy_vip: "10.0.10.100"
+
+# URL de step-ca (IP de lb-01 - PAS 127.0.0.1, cert non valide sinon)
+stepca_url: "https://10.0.10.11:8443"
+stepca_provisioner: "admin@infra.lan"
+
+# SAN du cert serveur
+haproxy_cert_dns_names:
+  - "web.infra.lan"
+  - "www.infra.lan"
+  - "lb-01.infra.lan"
+  - "lb-02.infra.lan"
+  - "10.0.10.100"
+  - "10.0.10.11"
+  - "10.0.10.12"
+
+# Duree de validite (max autorise par claims step-ca)
+haproxy_cert_validity: "2160h"
+
+# Backends web
+haproxy_backends:
+  - { name: "web-01", ip: "10.0.40.11", port: 80 }
+  - { name: "web-02", ip: "10.0.40.12", port: 80 }
+  - { name: "web-03", ip: "10.0.40.13", port: 80 }
+
+# Stats HAProxy
+haproxy_stats_user: "admin"
+haproxy_stats_password: "Stats2026!"
+
+# Chemins
+haproxy_cert_dir: "/etc/haproxy/certs"
+haproxy_cert_file: "/etc/haproxy/certs/web.pem"

@@ -1,0 +1,173 @@
+---
+# =============================================================================
+# Role stepca_init v1.2 - Initialisation PKI step-ca COMPLETE
+#
+# Sequence garantie :
+#   1. Creation dossier + password
+#   2. step ca init (genere ca.json)
+#   3. Patch claims (max 90j au lieu de 24h)
+#   4. Deploy service systemd
+#   5. Start service
+#   6. flush_handlers (applique tout restart en attente)
+#   7. wait_for + verify health
+#   8. verify claims actives
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. PREPARATION
+# -----------------------------------------------------------------------------
+- name: "Creer le dossier racine pour step-ca"
+  ansible.builtin.file:
+    path: "{{ stepca_dir }}"
+    state: directory
+    owner: "{{ stepca_user }}"
+    group: "{{ stepca_user }}"
+    mode: '0700'
+
+- name: "Generer le fichier de mot de passe"
+  ansible.builtin.copy:
+    content: "{{ stepca_password }}"
+    dest: "{{ stepca_dir }}/password.txt"
+    owner: "{{ stepca_user }}"
+    group: "{{ stepca_user }}"
+    mode: '0600'
+    force: false
+
+# -----------------------------------------------------------------------------
+# 2. INITIALISATION DE LA CA
+# -----------------------------------------------------------------------------
+- name: "Initialiser l'instance step-ca (creates ca.json)"
+  ansible.builtin.command:
+    cmd: >
+      step ca init
+      --deployment-type=standalone
+      --name="{{ stepca_name }}"
+      --dns="{{ stepca_dns_names | join(',') }}"
+      --address="{{ stepca_address }}"
+      --provisioner="{{ stepca_provisioner_name }}"
+      --password-file={{ stepca_dir }}/password.txt
+      --provisioner-password-file={{ stepca_dir }}/password.txt
+    creates: "{{ stepca_dir }}/config/ca.json"
+  environment:
+    STEPPATH: "{{ stepca_dir }}"
+  notify: restart step-ca
+
+- name: "Verifier que ca.json a ete cree"
+  ansible.builtin.stat:
+    path: "{{ stepca_dir }}/config/ca.json"
+  register: stepca_ca_json
+  failed_when: not stepca_ca_json.stat.exists
+
+# -----------------------------------------------------------------------------
+# 3. CLAIMS TLS (autoriser 90 jours)
+# -----------------------------------------------------------------------------
+- name: "Copier le script de configuration des claims"
+  ansible.builtin.copy:
+    src: configure_claims.py
+    dest: /tmp/configure_claims.py
+    mode: '0700'
+
+- name: "Configurer les claims TLS dans ca.json"
+  ansible.builtin.command:
+    cmd: >
+      python3 /tmp/configure_claims.py
+      {{ stepca_dir }}/config/ca.json
+      {{ stepca_min_tls_duration }}
+      {{ stepca_max_tls_duration }}
+      {{ stepca_default_tls_duration }}
+  register: claims_config
+  changed_when: claims_config.stdout == "CHANGED"
+  notify: restart step-ca
+
+- name: "Nettoyer le script de claims"
+  ansible.builtin.file:
+    path: /tmp/configure_claims.py
+    state: absent
+
+# -----------------------------------------------------------------------------
+# 4. SERVICE SYSTEMD
+# -----------------------------------------------------------------------------
+- name: "Deployer le service systemd step-ca"
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/step-ca.service
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=step-ca (smallstep PKI server)
+      After=network.target
+      Documentation=https://smallstep.com/docs/step-ca
+
+      [Service]
+      Type=simple
+      User={{ stepca_user }}
+      Environment=STEPPATH={{ stepca_dir }}
+      ExecStart=/usr/bin/step-ca {{ stepca_dir }}/config/ca.json --password-file {{ stepca_dir }}/password.txt
+      ExecReload=/bin/kill -HUP $MAINPID
+      Restart=on-failure
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: restart step-ca
+
+- name: "Activer et demarrer step-ca"
+  ansible.builtin.systemd:
+    name: step-ca
+    state: started
+    enabled: true
+    daemon_reload: true
+
+# -----------------------------------------------------------------------------
+# 5. FORCER L'APPLICATION DES HANDLERS (RESTART)
+# -----------------------------------------------------------------------------
+# A ce stade, si claims_config a renvoye CHANGED, restart step-ca est attendu.
+# On force son execution AVANT de continuer pour avoir step-ca avec les bons claims.
+- name: "Forcer l'application des handlers en attente"
+  ansible.builtin.meta: flush_handlers
+
+# -----------------------------------------------------------------------------
+# 6. VALIDATION
+# -----------------------------------------------------------------------------
+- name: "Attendre que step-ca soit pret sur le port 8443"
+  ansible.builtin.wait_for:
+    port: 8443
+    host: 127.0.0.1
+    timeout: 30
+
+- name: "Verifier que step-ca repond au health endpoint"
+  ansible.builtin.uri:
+    url: https://127.0.0.1:8443/health
+    validate_certs: false
+  register: stepca_health
+  retries: 5
+  delay: 2
+  until: stepca_health.status == 200
+
+- name: "Verifier les claims actifs dans ca.json"
+  ansible.builtin.command:
+    cmd: >
+      python3 -c "import json; c=json.load(open('{{ stepca_dir }}/config/ca.json'));
+      print(c['authority']['claims']['maxTLSCertDuration'])"
+  register: active_claims
+  changed_when: false
+  failed_when: active_claims.stdout.strip() != stepca_max_tls_duration
+
+- name: "Recuperer le fingerprint du root CA"
+  ansible.builtin.command: step certificate fingerprint {{ stepca_dir }}/certs/root_ca.crt
+  register: stepca_fingerprint
+  changed_when: false
+
+- name: "Resume step-ca init"
+  ansible.builtin.debug:
+    msg:
+      - "==========================================="
+      - "step-ca initialise avec succes !"
+      - "==========================================="
+      - "URL CA       : https://{{ ansible_default_ipv4.address }}:8443"
+      - "Root CA      : {{ stepca_dir }}/certs/root_ca.crt"
+      - "Fingerprint  : {{ stepca_fingerprint.stdout }}"
+      - "Max TLS dur  : {{ active_claims.stdout }} (claims actifs)"
+      - "Health       : HTTP {{ stepca_health.status }}"
+      - "==========================================="

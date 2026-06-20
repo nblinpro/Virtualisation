@@ -1,0 +1,161 @@
+---
+# =============================================================================
+# Role haproxy_https v1.2 - Genere cert step-ca + HAProxy HTTPS
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. PREPARATION
+# -----------------------------------------------------------------------------
+- name: "Creer le dossier des certs HAProxy"
+  ansible.builtin.file:
+    path: "{{ haproxy_cert_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+# -----------------------------------------------------------------------------
+# 2. GENERATION DU CERT (sur lb-01 uniquement)
+# -----------------------------------------------------------------------------
+- name: "Verifier que step-ca repond avant la generation"
+  ansible.builtin.uri:
+    url: "{{ stepca_url }}/health"
+    validate_certs: false
+  register: stepca_precheck
+  retries: 3
+  delay: 2
+  until: stepca_precheck.status == 200
+  when: inventory_hostname == "lb-01"
+
+- name: "Generer le cert pour le cluster web (lb-01 uniquement)"
+  ansible.builtin.shell:
+    cmd: |
+      step ca certificate \
+        "{{ haproxy_cert_dns_names[0] }}" \
+        {{ haproxy_cert_dir }}/web.crt \
+        {{ haproxy_cert_dir }}/web.key \
+        {% for san in haproxy_cert_dns_names %}--san "{{ san }}" {% endfor %} \
+        --not-after {{ haproxy_cert_validity }} \
+        --ca-url {{ stepca_url }} \
+        --root /root/.step/certs/root_ca.crt \
+        --provisioner "{{ stepca_provisioner }}" \
+        --provisioner-password-file /root/.step/password.txt \
+        --force
+  environment:
+    STEPPATH: /root/.step
+  args:
+    creates: "{{ haproxy_cert_dir }}/web.crt"
+  when: inventory_hostname == "lb-01"
+
+- name: "Concatener cert + key en fichier PEM pour HAProxy"
+  ansible.builtin.shell:
+    cmd: |
+      cat {{ haproxy_cert_dir }}/web.crt {{ haproxy_cert_dir }}/web.key > {{ haproxy_cert_file }}
+      chmod 600 {{ haproxy_cert_file }}
+      chown root:root {{ haproxy_cert_file }}
+  args:
+    creates: "{{ haproxy_cert_file }}"
+  when: inventory_hostname == "lb-01"
+
+- name: "Copier le root CA dans /etc/haproxy/certs/"
+  ansible.builtin.copy:
+    src: /root/.step/certs/root_ca.crt
+    dest: "{{ haproxy_cert_dir }}/root_ca.crt"
+    owner: root
+    group: root
+    mode: '0644'
+    remote_src: true
+  when: inventory_hostname == "lb-01"
+
+# -----------------------------------------------------------------------------
+# 3. DISTRIBUER LE CERT VERS LB-02
+# -----------------------------------------------------------------------------
+- name: "Recuperer le cert depuis lb-01 (slurp)"
+  ansible.builtin.slurp:
+    src: "{{ haproxy_cert_file }}"
+  register: cert_content
+  when: inventory_hostname == "lb-01"
+  delegate_to: lb-01
+  run_once: true
+
+- name: "Recuperer le root CA depuis lb-01"
+  ansible.builtin.slurp:
+    src: /root/.step/certs/root_ca.crt
+  register: root_ca_content
+  when: inventory_hostname == "lb-01"
+  delegate_to: lb-01
+  run_once: true
+
+- name: "Deployer le cert sur lb-02"
+  ansible.builtin.copy:
+    content: "{{ hostvars['lb-01']['cert_content']['content'] | b64decode }}"
+    dest: "{{ haproxy_cert_file }}"
+    owner: root
+    group: root
+    mode: '0600'
+  when: inventory_hostname == "lb-02"
+
+- name: "Deployer le root CA sur lb-02"
+  ansible.builtin.copy:
+    content: "{{ hostvars['lb-01']['root_ca_content']['content'] | b64decode }}"
+    dest: "{{ haproxy_cert_dir }}/root_ca.crt"
+    owner: root
+    group: root
+    mode: '0644'
+  when: inventory_hostname == "lb-02"
+
+# -----------------------------------------------------------------------------
+# 4. CONFIG HAPROXY HTTPS
+# -----------------------------------------------------------------------------
+- name: "Deployer haproxy.cfg (HTTPS)"
+  ansible.builtin.template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+    validate: 'haproxy -c -f %s'
+  notify: restart haproxy
+
+- name: "Forcer le restart HAProxy maintenant"
+  ansible.builtin.meta: flush_handlers
+
+- name: "Attendre HAProxy sur 443"
+  ansible.builtin.wait_for:
+    port: 443
+    host: 127.0.0.1
+    timeout: 30
+
+# -----------------------------------------------------------------------------
+# 5. TESTS POST-DEPLOIEMENT
+# -----------------------------------------------------------------------------
+- name: "Test 1 - HAProxy ecoute en HTTPS"
+  ansible.builtin.command:
+    cmd: ss -tlnp
+  register: ss_output
+  changed_when: false
+  failed_when: "':443' not in ss_output.stdout"
+
+- name: "Test 2 - curl HTTPS local avec verif via root CA"
+  ansible.builtin.command:
+    cmd: >
+      curl -s
+      --cacert {{ haproxy_cert_dir }}/root_ca.crt
+      --resolve web.infra.lan:443:127.0.0.1
+      https://web.infra.lan
+      -o /dev/null -w "%{http_code}"
+  register: curl_https_test
+  changed_when: false
+  failed_when: curl_https_test.stdout not in ["200", "301", "302"]
+
+- name: "Resume HTTPS"
+  ansible.builtin.debug:
+    msg:
+      - "==========================================="
+      - "HTTPS active sur {{ inventory_hostname }}"
+      - "==========================================="
+      - "Cert  : {{ haproxy_cert_file }}"
+      - "VIP   : {{ haproxy_vip }}"
+      - "Test  : HTTP {{ curl_https_test.stdout }}"
+      - "==========================================="

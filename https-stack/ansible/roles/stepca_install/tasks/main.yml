@@ -1,0 +1,70 @@
+---
+# =============================================================================
+# Role stepca_install v1.2 - Installation step-ca + step CLI
+# =============================================================================
+
+- name: "Definir l'architecture du paquet"
+  ansible.builtin.set_fact:
+    step_pkg_arch: "{{ step_arch_map[ansible_facts['architecture']] | default('amd64') }}"
+
+- name: "Verifier si step CLI est deja installe"
+  ansible.builtin.command: step version
+  register: step_check
+  changed_when: false
+  failed_when: false
+
+- name: "Verifier si step-ca est deja installe"
+  ansible.builtin.command: step-ca version
+  register: stepca_check
+  changed_when: false
+  failed_when: false
+
+- name: "Telecharger step CLI"
+  ansible.builtin.get_url:
+    url: "https://github.com/smallstep/cli/releases/download/v{{ step_version }}/step-cli_{{ step_version }}-1_{{ step_pkg_arch }}.deb"
+    dest: /tmp/step-cli.deb
+    mode: '0644'
+  when: step_check.rc != 0
+
+- name: "Telecharger step-ca"
+  ansible.builtin.get_url:
+    url: "https://github.com/smallstep/certificates/releases/download/v{{ step_ca_version }}/step-ca_{{ step_ca_version }}-1_{{ step_pkg_arch }}.deb"
+    dest: /tmp/step-ca.deb
+    mode: '0644'
+  when: stepca_check.rc != 0
+
+- name: "Installer step CLI"
+  ansible.builtin.apt:
+    deb: /tmp/step-cli.deb
+    state: present
+  when: step_check.rc != 0
+
+- name: "Installer step-ca"
+  ansible.builtin.apt:
+    deb: /tmp/step-ca.deb
+    state: present
+  when: stepca_check.rc != 0
+
+- name: "Nettoyer les paquets .deb"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/step-cli.deb
+    - /tmp/step-ca.deb
+
+- name: "Verifier installation step CLI"
+  ansible.builtin.command: step version
+  register: step_version_check
+  changed_when: false
+
+- name: "Verifier installation step-ca"
+  ansible.builtin.command: step-ca version
+  register: stepca_version_check
+  changed_when: false
+
+- name: "Resume install step-ca"
+  ansible.builtin.debug:
+    msg:
+      - "step CLI : {{ step_version_check.stdout_lines[0] }}"
+      - "step-ca  : {{ stepca_version_check.stdout_lines[0] }}"
