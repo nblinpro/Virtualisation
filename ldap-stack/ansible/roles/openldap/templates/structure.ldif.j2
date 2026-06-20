@@ -1,0 +1,59 @@
+# =============================================================================
+# Structure LDAP - Genere par Ansible
+# {{ ldap_base_dn }}
+# =============================================================================
+
+# Unite organisationnelle pour les utilisateurs
+dn: ou=people,{{ ldap_base_dn }}
+objectClass: organizationalUnit
+ou: people
+
+# Unite organisationnelle pour les groupes
+dn: ou=groups,{{ ldap_base_dn }}
+objectClass: organizationalUnit
+ou: groups
+
+# =============================================================================
+# Groupes
+# =============================================================================
+{% for group in ldap_groups %}
+
+dn: cn={{ group.cn }},ou=groups,{{ ldap_base_dn }}
+objectClass: posixGroup
+objectClass: top
+cn: {{ group.cn }}
+gidNumber: {{ group.gidNumber }}
+description: {{ group.description }}
+{% endfor %}
+
+# =============================================================================
+# Utilisateurs
+# =============================================================================
+{% for user in ldap_users %}
+
+dn: uid={{ user.uid }},ou=people,{{ ldap_base_dn }}
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: {{ user.uid }}
+cn: {{ user.cn }}
+sn: {{ user.sn }}
+displayName: {{ user.cn }}
+uidNumber: {{ user.uidNumber }}
+gidNumber: {{ user.gidNumber }}
+homeDirectory: /home/{{ user.uid }}
+loginShell: /bin/bash
+mail: {{ user.uid }}@{{ ldap_domain }}
+userPassword: {CRYPT}{{ ldap_user_default_password | password_hash("sha512") }}
+{% endfor %}
+
+# =============================================================================
+# Membres des groupes
+# =============================================================================
+{% for user in ldap_users %}
+
+dn: cn={{ user.group }},ou=groups,{{ ldap_base_dn }}
+changetype: modify
+add: memberUid
+memberUid: {{ user.uid }}
+{% endfor %}

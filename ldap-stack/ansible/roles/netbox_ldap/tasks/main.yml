@@ -1,0 +1,76 @@
+---
+# =============================================================================
+# Role netbox_ldap - Integration LDAP read-only dans NetBox
+# Installation du backend django-auth-ldap + configuration
+# =============================================================================
+
+- name: "Installer dependances systeme python-ldap"
+  ansible.builtin.apt:
+    name:
+      - libldap2-dev
+      - libsasl2-dev
+      - libssl-dev
+      - python3-dev
+      - build-essential
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: "Installer django-auth-ldap dans le venv NetBox"
+  ansible.builtin.pip:
+    name:
+      - python-ldap
+      - django-auth-ldap
+    virtualenv: /opt/netbox/venv
+
+- name: "Deployer ldap_config.py"
+  ansible.builtin.template:
+    src: ldap_config.py.j2
+    dest: /opt/netbox/netbox/netbox/ldap_config.py
+    owner: netbox
+    group: netbox
+    mode: '0640'
+
+- name: "Activer le backend LDAP dans configuration.py"
+  ansible.builtin.blockinfile:
+    path: /opt/netbox/netbox/netbox/configuration.py
+    marker: "# {mark} ANSIBLE LDAP INTEGRATION"
+    block: |
+
+      # =============================================================================
+      # LDAP Authentication (read-only)
+      # =============================================================================
+      REMOTE_AUTH_ENABLED = True
+      REMOTE_AUTH_BACKEND = 'netbox.authentication.LDAPBackend'
+
+- name: "Redemarrer NetBox pour appliquer la config"
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: restarted
+    daemon_reload: true
+  loop:
+    - netbox
+    - netbox-rq
+
+- name: "Attendre que NetBox soit pret"
+  ansible.builtin.wait_for:
+    port: 8001
+    host: 127.0.0.1
+    timeout: 60
+
+- name: "Resume integration LDAP"
+  ansible.builtin.debug:
+    msg:
+      - "==========================================="
+      - "NetBox <-> LDAP integration deployee !"
+      - "==========================================="
+      - "Server LDAP : ldap://10.0.20.40:389"
+      - "Base DN     : ou=people,dc=infra,dc=lan"
+      - "==========================================="
+      - "Tu peux te connecter sur NetBox avec :"
+      - "  - admin   / Ynov2026!"
+      - "  - teacher / Ynov2026!"
+      - "  - student / Ynov2026!"
+      - "==========================================="
+      - "URL NetBox : http://192.168.80.141:8095"
+      - "==========================================="

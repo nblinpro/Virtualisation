@@ -1,0 +1,14 @@
+---
+- name: "Integration NetBox <-> LDAP (read-only)"
+  hosts: netbox
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: "Attendre la connectivite SSH"
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 120
+
+  roles:
+    - netbox_ldap

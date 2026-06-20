@@ -1,0 +1,25 @@
+---
+# =============================================================================
+# Defaults - openldap
+# =============================================================================
+
+# Base DN
+ldap_domain: "infra.lan"
+ldap_base_dn: "dc=infra,dc=lan"
+ldap_org: "Ynov Lab"
+
+# Mots de passe (en clair - seront hashes en SSHA par le playbook)
+ldap_admin_password: "LdapAdmin2026!"
+ldap_user_default_password: "Ynov2026!"
+
+# Utilisateurs LDAP (scenario simple)
+ldap_users:
+  - { uid: "admin",   cn: "LDAP Admin",   sn: "Admin",   uidNumber: 10001, gidNumber: 10001, group: "admins" }
+  - { uid: "teacher", cn: "Teacher Ynov", sn: "Teacher", uidNumber: 10002, gidNumber: 10002, group: "teachers" }
+  - { uid: "student", cn: "Student Ynov", sn: "Student", uidNumber: 10003, gidNumber: 10003, group: "students" }
+
+# Groupes LDAP
+ldap_groups:
+  - { cn: "admins",   gidNumber: 10001, description: "Administrateurs infra" }
+  - { cn: "teachers", gidNumber: 10002, description: "Enseignants Ynov" }
+  - { cn: "students", gidNumber: 10003, description: "Etudiants Ynov" }

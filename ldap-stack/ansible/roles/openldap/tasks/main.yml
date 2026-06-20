@@ -1,0 +1,145 @@
+---
+# =============================================================================
+# Role openldap - Installation et configuration OpenLDAP (slapd) Debian 13
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. PRE-CONFIG : forcer debconf pour install non-interactive
+# -----------------------------------------------------------------------------
+- name: "Installer debconf-utils"
+  ansible.builtin.apt:
+    name: debconf-utils
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: "Pre-configurer slapd (debconf)"
+  ansible.builtin.debconf:
+    name: slapd
+    question: "{{ item.question }}"
+    vtype: "{{ item.vtype }}"
+    value: "{{ item.value }}"
+  loop:
+    - { question: "slapd/domain",             vtype: "string",  value: "{{ ldap_domain }}" }
+    - { question: "shared/organization",      vtype: "string",  value: "{{ ldap_org }}" }
+    - { question: "slapd/password1",          vtype: "password",value: "{{ ldap_admin_password }}" }
+    - { question: "slapd/password2",          vtype: "password",value: "{{ ldap_admin_password }}" }
+    - { question: "slapd/backend",            vtype: "select",  value: "MDB" }
+    - { question: "slapd/purge_database",     vtype: "boolean", value: "true" }
+    - { question: "slapd/move_old_database",  vtype: "boolean", value: "true" }
+    - { question: "slapd/allow_ldap_v2",      vtype: "boolean", value: "false" }
+    - { question: "slapd/no_configuration",   vtype: "boolean", value: "false" }
+  no_log: true
+
+# -----------------------------------------------------------------------------
+# 2. INSTALLATION
+# -----------------------------------------------------------------------------
+- name: "Installer slapd + utilitaires LDAP"
+  ansible.builtin.apt:
+    name:
+      - slapd
+      - ldap-utils
+      - python3-ldap
+      - python3-passlib
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: "Demarrer et activer slapd"
+  ansible.builtin.systemd:
+    name: slapd
+    state: started
+    enabled: true
+
+- name: "Attendre que slapd ecoute sur 389"
+  ansible.builtin.wait_for:
+    port: 389
+    host: 127.0.0.1
+    timeout: 30
+
+# -----------------------------------------------------------------------------
+# 3. CREATION DE L'ARBORESCENCE (OU + groupes + users)
+# -----------------------------------------------------------------------------
+- name: "Generer le LDIF de structure (ou + groupes + users)"
+  ansible.builtin.template:
+    src: structure.ldif.j2
+    dest: /tmp/structure.ldif
+    mode: '0600'
+
+- name: "Verifier si la structure existe deja"
+  ansible.builtin.command:
+    cmd: ldapsearch -x -H ldap://localhost -b "ou=people,{{ ldap_base_dn }}" -D "cn=admin,{{ ldap_base_dn }}" -w "{{ ldap_admin_password }}"
+  register: structure_check
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: "Appliquer le LDIF de structure (premiere fois)"
+  ansible.builtin.command:
+    cmd: ldapadd -x -H ldap://localhost -D "cn=admin,{{ ldap_base_dn }}" -w "{{ ldap_admin_password }}" -f /tmp/structure.ldif
+  when: structure_check.rc != 0 or "ou=people" not in structure_check.stdout
+  register: ldapadd_result
+  changed_when: ldapadd_result.rc == 0
+  failed_when: ldapadd_result.rc != 0 and "Already exists" not in ldapadd_result.stderr
+  no_log: true
+
+- name: "Nettoyer le fichier temporaire"
+  ansible.builtin.file:
+    path: /tmp/structure.ldif
+    state: absent
+
+# -----------------------------------------------------------------------------
+# 4. TESTS POST-DEPLOIEMENT
+# -----------------------------------------------------------------------------
+- name: "Test 1 - Anonymous bind"
+  ansible.builtin.command:
+    cmd: ldapwhoami -x -H ldap://localhost
+  register: test_anon
+  changed_when: false
+  failed_when: test_anon.rc != 0
+
+- name: "Test 2 - Bind admin"
+  ansible.builtin.command:
+    cmd: ldapwhoami -x -H ldap://localhost -D "cn=admin,{{ ldap_base_dn }}" -w "{{ ldap_admin_password }}"
+  register: test_admin_bind
+  changed_when: false
+  failed_when: "'cn=admin' not in test_admin_bind.stdout"
+  no_log: true
+
+- name: "Test 3 - Bind user 'teacher'"
+  ansible.builtin.command:
+    cmd: ldapwhoami -x -H ldap://localhost -D "uid=teacher,ou=people,{{ ldap_base_dn }}" -w "{{ ldap_user_default_password }}"
+  register: test_user_bind
+  changed_when: false
+  failed_when: "'uid=teacher' not in test_user_bind.stdout"
+  no_log: true
+
+- name: "Test 4 - Lister les utilisateurs"
+  ansible.builtin.command:
+    cmd: ldapsearch -x -H ldap://localhost -b "ou=people,{{ ldap_base_dn }}" -D "cn=admin,{{ ldap_base_dn }}" -w "{{ ldap_admin_password }}" "(objectClass=inetOrgPerson)" uid
+  register: test_search
+  changed_when: false
+  failed_when: "'uid=admin' not in test_search.stdout or 'uid=teacher' not in test_search.stdout or 'uid=student' not in test_search.stdout"
+  no_log: true
+
+- name: "Resume des tests"
+  ansible.builtin.debug:
+    msg:
+      - "==========================================="
+      - "OpenLDAP deploye avec succes !"
+      - "==========================================="
+      - "Server   : ldap://10.0.20.40:389"
+      - "Base DN  : {{ ldap_base_dn }}"
+      - "Admin DN : cn=admin,{{ ldap_base_dn }}"
+      - "==========================================="
+      - "Utilisateurs crees :"
+      - "  - uid=admin   (LDAP Admin / Ynov2026!)"
+      - "  - uid=teacher (Teacher    / Ynov2026!)"
+      - "  - uid=student (Student    / Ynov2026!)"
+      - "==========================================="
+      - "Tests :"
+      - "  Test 1 - Anonymous bind    : OK"
+      - "  Test 2 - Admin bind        : OK"
+      - "  Test 3 - User bind         : OK"
+      - "  Test 4 - List users        : OK"
+      - "==========================================="
