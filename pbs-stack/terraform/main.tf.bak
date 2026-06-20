@@ -1,0 +1,155 @@
+###############################################################################
+# Terraform - VM Proxmox Backup Server (pbs-01)
+# VLAN 60 MONITORING - pve-03
+###############################################################################
+
+terraform {
+  required_version = ">= 1.5.0"
+  required_providers {
+    proxmox = {
+      source  = "bpg/proxmox"
+      version = "~> 0.66"
+    }
+  }
+}
+
+# =============================================================================
+# Variables
+# =============================================================================
+variable "proxmox_api_url" {
+  type    = string
+  default = "https://192.168.3.21:8006/"
+}
+
+variable "proxmox_api_token_id" {
+  type    = string
+  default = "root@pam!terraform-token"
+}
+
+variable "proxmox_api_token_secret" {
+  type      = string
+  sensitive = true
+}
+
+variable "proxmox_ssh_private_key" {
+  type    = string
+  default = "/root/.ssh/proxmox_lab"
+}
+
+variable "pbs_iso_path" {
+  type        = string
+  description = "Chemin de l'ISO PBS sur le datastore local"
+  default     = "local:iso/proxmox-backup-server_4.0-1.iso"
+}
+
+# =============================================================================
+# Provider
+# =============================================================================
+provider "proxmox" {
+  endpoint  = var.proxmox_api_url
+  api_token = "${var.proxmox_api_token_id}=${var.proxmox_api_token_secret}"
+  insecure  = true
+
+  ssh {
+    agent       = false
+    username    = "root"
+    private_key = file(var.proxmox_ssh_private_key)
+  }
+}
+
+# =============================================================================
+# VM : pbs-01
+# =============================================================================
+resource "proxmox_virtual_environment_vm" "pbs_01" {
+  name        = "pbs-01"
+  description = "Proxmox Backup Server - VLAN 60 MONITORING"
+  tags        = ["pbs", "backup", "vlan60", "monitoring"]
+
+  node_name = "pve-03"
+  vm_id     = 700
+
+  # Demarrage automatique
+  on_boot       = true
+  startup {
+    order      = 100
+    up_delay   = 30
+    down_delay = 30
+  }
+
+  cpu {
+    cores   = 1
+    type    = "host"
+    sockets = 1
+  }
+
+  memory {
+    dedicated = 1024
+  }
+
+  # Disque systeme (8 GB)
+  disk {
+    datastore_id = "local-lvm"
+    interface    = "scsi0"
+    iothread     = true
+    size         = 8
+    file_format  = "raw"
+  }
+
+  # Disque additionnel pour stocker les backups (50 GB)
+  disk {
+    datastore_id = "local-lvm"
+    interface    = "scsi1"
+    iothread     = true
+    size         = 50
+    file_format  = "raw"
+  }
+
+  network_device {
+    bridge   = "vmbr3"
+    model    = "virtio"
+    vlan_id  = 60
+    firewall = false
+  }
+
+  # Boot sur l'ISO PBS
+  cdrom {
+    file_id   = var.pbs_iso_path
+    interface = "ide2"
+  }
+
+  boot_order = ["scsi0", "ide2"]
+
+  operating_system {
+    type = "l26"
+  }
+
+  scsi_hardware = "virtio-scsi-pci"
+
+  # Pas d'agent QEMU au demarrage initial (a installer apres)
+  agent {
+    enabled = false
+  }
+
+  # Empecher Terraform de detruire les disques si on modifie la VM
+  lifecycle {
+    ignore_changes = [
+      cdrom,    # On retirera l'ISO manuellement apres install
+      started,  # Ne pas redemarrer la VM a chaque apply
+    ]
+  }
+}
+
+# =============================================================================
+# Outputs
+# =============================================================================
+output "pbs_summary" {
+  value = {
+    hostname    = "pbs-01"
+    vmid        = 700
+    ip_target   = "10.0.60.20"
+    node        = "pve-03"
+    vlan        = "60 (MONITORING)"
+    web_ui      = "https://10.0.60.20:8007"
+    note        = "Installation initiale interactive via console PVE"
+  }
+}

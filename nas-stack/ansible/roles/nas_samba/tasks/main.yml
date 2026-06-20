@@ -1,12 +1,18 @@
 ---
 # =============================================================================
-# Role nas_samba - Installation et configuration Samba sur Debian 13 LXC
+# Role nas_samba v1.1 - Installation et configuration Samba sur Debian 13 LXC
+# Ameliorations :
+#  - smbclient installe (tests locaux)
+#  - share backups retire (PBS gere maintenant)
+#  - user nasadmin retire
+#  - durcissement SMB3 (signing=auto pour compat invite)
+#  - tests post-deploiement automatises
 # =============================================================================
 
 # -----------------------------------------------------------------------------
 # 1. PAQUETS
 # -----------------------------------------------------------------------------
-- name: "Installer Samba et utilitaires"
+- name: "Installer Samba et utilitaires (avec smbclient pour tests)"
   ansible.builtin.apt:
     name:
       - samba
@@ -28,7 +34,7 @@
     state: present
 
 # -----------------------------------------------------------------------------
-# 3. UTILISATEURS LINUX (pour Samba)
+# 3. GROUPES + UTILISATEURS LINUX (pour Samba)
 # -----------------------------------------------------------------------------
 - name: "Creer les groupes individuels pour chaque utilisateur Samba"
   ansible.builtin.group:
@@ -118,14 +124,15 @@
 # -----------------------------------------------------------------------------
 # 6. SERVICES SYSTEMD
 # -----------------------------------------------------------------------------
-# Note : pas de nmbd (NetBIOS broadcast) car LXC unprivileged limite
-# On garde uniquement smbd qui suffit pour les acces directs par IP/nom DNS
-
 - name: "Activer et demarrer smbd"
   ansible.builtin.systemd:
     name: smbd
     state: started
     enabled: true
+
+# Forcer un restart si le smb.conf a change (handler exec maintenant)
+- name: "Forcer l'application des handlers en attente"
+  ansible.builtin.meta: flush_handlers
 
 - name: "Verifier que smbd ecoute sur 445"
   ansible.builtin.wait_for:
@@ -134,7 +141,7 @@
     timeout: 30
 
 # -----------------------------------------------------------------------------
-# 7. AJOUTER UN README DANS PUBLIC
+# 7. README DANS PUBLIC
 # -----------------------------------------------------------------------------
 - name: "Creer un README dans le share public"
   ansible.builtin.copy:
@@ -146,8 +153,7 @@
 
       Partages disponibles :
         - public     : Lecture seule, acces invite
-        - documents  : Lecture/ecriture, authentifie (ynov, nasadmin)
-        - backups    : Admin uniquement (nasadmin)
+        - documents  : Lecture/ecriture, authentifie (ynov)
 
       Acces Windows :
         \\10.0.99.10\public
@@ -159,6 +165,51 @@
 
       Servi par : Samba sur nas-01 (10.0.99.10)
       VLAN      : 99 BACKUP
+
+      Note : Les sauvegardes des VMs/CTs sont desormais
+             gerees par Proxmox Backup Server (pbs-01).
+             https://10.0.60.20:8007
     owner: nobody
     group: nogroup
     mode: '0644'
+
+# -----------------------------------------------------------------------------
+# 8. TESTS POST-DEPLOIEMENT
+# -----------------------------------------------------------------------------
+- name: "Test 1 - Lister les shares (avec auth)"
+  ansible.builtin.command:
+    cmd: smbclient -L //127.0.0.1 -U {{ samba_users[0].name }}%{{ samba_users[0].password }}
+  register: test_list_shares
+  changed_when: false
+  failed_when: "'public' not in test_list_shares.stdout"
+
+- name: "Test 2 - Acceder au share public (anonyme)"
+  ansible.builtin.command:
+    cmd: smbclient //127.0.0.1/public -N -c 'ls'
+  register: test_public
+  changed_when: false
+  failed_when: "'README' not in test_public.stdout"
+
+- name: "Test 3 - Acceder au share documents (authentifie)"
+  ansible.builtin.command:
+    cmd: smbclient //127.0.0.1/documents -U {{ samba_users[0].name }}%{{ samba_users[0].password }} -c 'ls'
+  register: test_documents
+  changed_when: false
+  failed_when: test_documents.rc != 0
+
+- name: "Resume des tests"
+  ansible.builtin.debug:
+    msg:
+      - "==========================================="
+      - "Tests post-deploiement NAS Samba"
+      - "==========================================="
+      - "Test 1 - Liste shares    : OK"
+      - "Test 2 - Acces public    : OK"
+      - "Test 3 - Acces documents : OK"
+      - "==========================================="
+      - "Shares disponibles :"
+      - "  smb://10.0.99.10/public      (anonyme)"
+      - "  smb://10.0.99.10/documents   (ynov / Ynov2026!)"
+      - "==========================================="
+      - "Backups VMs/CTs : geres par PBS sur pbs-01"
+      - "==========================================="

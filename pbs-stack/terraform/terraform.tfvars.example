@@ -1,0 +1,9 @@
+proxmox_api_url          = "https://192.168.3.21:8006/"
+proxmox_api_token_id     = "root@pam!terraform-token"
+proxmox_api_token_secret = "4e6e70bc-5d4a-423b-a67f-c5f5b39adb3a"
+
+proxmox_ssh_private_key = "/root/.ssh/proxmox_lab"
+
+# Chemin ISO PBS sur le datastore local de pve-03
+# Verifier d'abord avec : ssh root@192.168.3.23 "ls /var/lib/vz/template/iso/"
+pbs_iso_path = "local:iso/proxmox-backup-server_4.0-1.iso"

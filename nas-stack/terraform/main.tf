@@ -1,6 +1,7 @@
 ###############################################################################
 # Terraform - Container LXC : nas-01 (Serveur de fichiers Samba)
 # VLAN 99 BACKUP - pve-03
+# v1.1 - Sans share backups (PBS gere maintenant les sauvegardes)
 ###############################################################################
 
 terraform {
@@ -146,6 +147,7 @@ output "nas_summary" {
     ip       = "10.0.99.10"
     vlan     = "99 (BACKUP)"
     node     = "pve-03"
-    shares   = "smb://10.0.99.10/public  smb://10.0.99.10/documents  smb://10.0.99.10/backups"
+    shares   = "smb://10.0.99.10/public  smb://10.0.99.10/documents"
+    backups  = "Les sauvegardes VMs/CTs sont gerees par pbs-01"
   }
 }

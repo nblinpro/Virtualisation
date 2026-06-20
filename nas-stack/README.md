@@ -1,7 +1,17 @@
-# Stack NAS Samba - Serveur de fichiers
+# Stack NAS Samba v1.1 - Serveur de fichiers
 
-Deploiement automatise d'un serveur de fichiers Samba conformement au sujet :
-> "Serveur de Fichiers (NAS) : Un conteneur LXC avec Samba/NFS pour le partage de documents."
+Deploiement automatise d'un serveur de fichiers Samba.
+
+## Changements v1.0 -> v1.1
+
+| Element | Avant | Apres |
+|---------|-------|-------|
+| Share `backups` | Present | Retire (PBS gere) |
+| Utilisateur `nasadmin` | Present | Retire |
+| `smbclient` (client) | Absent | Installe |
+| `server signing` | non defini | auto (compat invite) |
+| Protocole min | SMB2_10 | SMB3 |
+| Tests post-deploy | Manuels | Automatiques (3 tests) |
 
 ## Specifications
 
@@ -16,50 +26,47 @@ Deploiement automatise d'un serveur de fichiers Samba conformement au sujet :
 | IP | 10.0.99.10/24 |
 | VLAN | 99 (BACKUP) |
 
-## Composants installes
+## Composants
 
 - **Samba** (smbd) sur port 445
-- **3 shares** : public (lecture seule), documents (auth), backups (admin)
-- **2 utilisateurs** : ynov (standard), nasadmin (admin)
+- **smbclient** pour tests locaux
+- **2 shares** : public (RO invite), documents (RW auth)
+- **1 utilisateur** Samba : ynov
 
 ## Shares disponibles
 
 | Share | Acces | Authentification | Usage |
 |-------|-------|------------------|-------|
-| `public` | Lecture seule | Invite | Documentation, fichiers de test |
-| `documents` | RW | `ynov` / `nasadmin` | Documents partages |
-| `backups` | RW | `nasadmin` uniquement | Sauvegardes (futur PBS) |
+| `public` | Lecture seule | Invite | Documentation, README |
+| `documents` | RW | `ynov` | Documents partages utilisateur |
 
-## Mots de passe Samba
+## Identifiants
 
-| Utilisateur | Mot de passe |
-|-------------|--------------|
-| `ynov` | `Ynov2026!` |
-| `nasadmin` | `NasAdmin2026!` |
+| User | Password | Acces |
+|------|----------|-------|
+| `ynov` | `Ynov2026!` | public + documents |
 
 ## Procedure de deploiement
 
-### 1. Decompresser et configurer
+### 1. Decompresser
 
 ```bash
 cd ~/Virtualisation/
 tar -xzf nas-stack.tar.gz
 cd nas-stack/
+```
 
+### 2. Provisionner avec Terraform (si nouvelle install)
+
+```bash
 cd terraform/
 cp ~/Virtualisation/netbox-stack/terraform/terraform.tfvars .
 cp -r ~/Virtualisation/netbox-stack/terraform/.terraform .
 cp ~/Virtualisation/netbox-stack/terraform/.terraform.lock.hcl .
-```
 
-### 2. Provisionner le LXC
-
-```bash
 terraform init
 terraform apply -auto-approve
 ```
-
-⏱ Duree : ~1 minute.
 
 ### 3. Echange cle SSH
 
@@ -75,126 +82,96 @@ cd ../ansible/
 ansible-playbook -i inventory.ini playbook-nas.yml
 ```
 
-⏱ Duree : ~3 minutes.
+⏱ ~2 minutes. Le playbook execute automatiquement 3 tests de validation a la fin.
+
+## Migration depuis v1.0 (si vous aviez l'ancien stack)
+
+Pour passer de l'ancienne version (avec share `backups` + user `nasadmin`) :
+
+```bash
+# 1. Mettre a jour le code
+cd ~/Virtualisation/
+mv nas-stack nas-stack.v1.0.bak
+tar -xzf nas-stack.tar.gz
+
+# 2. Appliquer le nouveau role
+cd nas-stack/ansible
+ansible-playbook -i inventory.ini playbook-nas.yml
+
+# 3. Nettoyer manuellement les elements obsoletes
+ssh root@10.0.99.10 "
+  rm -rf /srv/shares/backups
+  smbpasswd -x nasadmin 2>/dev/null
+  userdel nasadmin 2>/dev/null
+  groupdel nasadmin 2>/dev/null
+"
+```
 
 ## Acces aux partages
 
 ### Depuis Windows
 
-Ouvrir l'explorateur et taper dans la barre d'adresse :
-
 ```
-\\10.0.99.10\public          (lecture seule, sans authentification)
+\\10.0.99.10\public          (lecture seule, sans auth)
 \\10.0.99.10\documents       (login : ynov / Ynov2026!)
-\\10.0.99.10\backups         (login : nasadmin / NasAdmin2026!)
 ```
 
-⚠️ Pour acceder depuis Windows, il faut une route depuis ton PC vers VLAN 99 (NAT inbound sur OPNsense ou VPN).
-
-### Depuis Linux (smbclient)
+### Depuis Linux
 
 ```bash
-# Lister les shares
-smbclient -L //10.0.99.10 -N
+# Lister
+smbclient -L //10.0.99.10 -U ynov%Ynov2026!
 
-# Acces public (anonyme)
+# Acces public
 smbclient //10.0.99.10/public -N
 
-# Acces documents (authentifie)
+# Acces documents
 smbclient //10.0.99.10/documents -U ynov%Ynov2026!
 
-# Monter en local
+# Monter
 mount -t cifs //10.0.99.10/documents /mnt/docs \
   -o username=ynov,password=Ynov2026!,uid=1000,gid=1000
 ```
 
-### Depuis macOS (Finder)
+## Tests post-deploiement automatises
 
-`Cmd+K` puis `smb://10.0.99.10`
+Le playbook execute 3 tests :
 
-## NAT inbound OPNsense (optionnel - acces Windows depuis WAN)
+1. **Liste des shares** : verifie que `public` est visible
+2. **Acces public anonyme** : verifie qu'on peut lire le README
+3. **Acces documents authentifie** : verifie l'auth `ynov`
 
-Pour acceder au NAS depuis ton PC Windows via WAN (192.168.80.x) :
+Si un test echoue, le playbook s'arrete et indique le probleme.
 
-| Champ | Valeur |
-|-------|--------|
-| Interface | WAN |
-| Protocol | TCP |
-| Destination port | 445 |
-| Redirect IP | 10.0.99.10 |
-| Redirect port | 445 |
+## Strategie de sauvegarde
 
-Puis acces depuis Windows : `\\192.168.80.141\public`
+- **Documents utilisateur** : sur le NAS Samba (donnees vivantes)
+- **Sauvegardes VMs/CTs** : sur **Proxmox Backup Server** (pbs-01)
+  - URL : https://10.0.60.20:8007
+  - Datastore : `backups`
 
-⚠️ Note : exposer SMB sur Internet est une **TRES mauvaise pratique** (WannaCry, etc.). En lab c'est OK, mais en prod jamais sans VPN.
-
-## Tests post-deploiement
-
-### Depuis le bastion
-
-```bash
-# Test smbclient
-ssh -i ~/.ssh/proxmox_lab root@10.0.10.50 "apk add samba-client 2>/dev/null; smbclient -L //10.0.99.10 -N"
-```
-
-### Verifications sur le NAS
-
-```bash
-ssh -i ~/.ssh/proxmox_lab root@10.0.99.10
-
-# Statut Samba
-systemctl status smbd
-
-# Config Samba (validation syntaxe)
-testparm
-
-# Lister les utilisateurs Samba
-pdbedit -L
-
-# Lister les shares
-smbclient -L //127.0.0.1 -N
-
-# Voir les connexions actives
-smbstatus
-```
+Les deux roles sont **separes** : NAS = production, PBS = sauvegardes.
 
 ## Troubleshooting
 
-### Erreur : OOM kill smbd avec 256 MB RAM
+### Test 2 echoue avec "Bad SMB2 signature"
 
-Si tu vois `Out of memory: Killed process ... smbd` dans dmesg :
+Cause : `server signing = mandatory` empeche les invites de se connecter.
+Solution : utiliser `server signing = auto` (corrige dans v1.1).
 
+### Connexion impossible depuis Windows
+
+Verifier :
+1. `\\10.0.99.10` (par IP, pas par nom NetBIOS)
+2. Reseau autorise dans `hosts allow` (RFC 1918 par defaut)
+3. Pas de regle pare-feu OPNsense qui bloque
+
+### Ressources tendues
+
+256 MB RAM est tres juste. Si OOM kill :
 ```bash
-# Augmenter la RAM
-ssh -i ~/.ssh/proxmox_lab root@192.168.3.21 \
-  "pct set 601 -memory 384"
+ssh root@192.168.3.21 "pct set 601 -memory 384"
 ```
-
-### Erreur : "NT_STATUS_LOGON_FAILURE" lors de la connexion
-
-Verifier que l'utilisateur Samba est bien active :
-
-```bash
-ssh root@10.0.99.10 "pdbedit -L -v ynov"
-# Verifier 'Account Flags' contient 'U' (User) sans 'D' (Disabled)
-
-# Reactiver si necessaire
-smbpasswd -e ynov
-```
-
-### Erreur : connexion refusee
-
-```bash
-# Verifier que smbd ecoute
-ss -tlnp | grep 445
-
-# Voir les logs Samba
-tail -50 /var/log/samba/log.smbd
-```
-
-### Pas de NetBIOS broadcast
-
-Le service `nmbd` n'est PAS active car incompatible avec LXC unprivileged. Consequence : tu ne verras pas le NAS dans le voisinage reseau Windows. Acces uniquement par IP ou nom DNS.
 
 ## Structure du projet
 
@@ -202,26 +179,27 @@ Le service `nmbd` n'est PAS active car incompatible avec LXC unprivileged. Conse
 nas-stack/
 ├── README.md
 ├── terraform/
-│   ├── main.tf                                CT 601 (1 vCPU/256MB/5GB)
+│   ├── main.tf                              CT 601 (1vCPU/256MB/5GB)
 │   └── terraform.tfvars.example
 └── ansible/
     ├── inventory.ini
     ├── playbook-nas.yml
     └── roles/nas_samba/
-        ├── defaults/main.yml                  Users + shares
-        ├── handlers/main.yml
-        ├── tasks/main.yml                     Install + config
+        ├── defaults/main.yml                Users + 2 shares
+        ├── handlers/main.yml                Restart samba
+        ├── tasks/main.yml                   Install + config + 3 tests
         └── templates/
-            └── smb.conf.j2                    Config Samba
+            └── smb.conf.j2                  Config Samba SMB3 + signing auto
+
 ```
 
 ## Pour le rapport
 
 Points valorisants :
 
-- ✅ **Sujet respecte** : LXC + Samba pour partage de documents
-- ✅ **Multi-niveaux d'acces** : invite, authentifie, admin
-- ✅ **SMB3** uniquement (`server min protocol = SMB2_10`)
-- ✅ **Restriction reseau** : `hosts allow` limite aux RFC 1918
-- ✅ **Ressources legeres** : 256 MB RAM (4x moins qu'une VM TrueNAS)
-- ✅ **Cohesion IaC** : meme template Debian 13, meme stack Terraform + Ansible
+- ✅ **Separation des responsabilites** : NAS = donnees, PBS = sauvegardes
+- ✅ **Durcissement** : SMB3 only, signature SMB3, hosts allow RFC 1918
+- ✅ **Tests automatises** : 3 tests valides a chaque deploiement
+- ✅ **Idempotent** : replay sans risque
+- ✅ **Leger** : 256 MB RAM (vs 8 GB TrueNAS Core)
+- ✅ **IaC** : Terraform + Ansible coherent avec le reste du datacenter

@@ -1,10 +1,11 @@
 ---
 # =============================================================================
-# Defaults - nas_samba
-# Serveur de fichiers Samba pour le NAS
+# Defaults - nas_samba v1.1
+# Serveur de fichiers Samba pour le NAS (sans share backups)
+# Les sauvegardes des VMs/CTs sont desormais gerees par PBS (pbs-01)
 # =============================================================================
 
-# Workgroup Windows (compatibilite client)
+# Workgroup Windows
 samba_workgroup: "YNOV"
 samba_server_string: "NAS Ynov (Samba %v)"
 samba_netbios_name: "NAS-YNOV"
@@ -12,20 +13,17 @@ samba_netbios_name: "NAS-YNOV"
 # Repertoire racine des partages
 samba_shares_root: "/srv/shares"
 
-# Reseaux autorises a se connecter (RFC 1918 internes)
+# Reseaux autorises (RFC 1918 internes)
 samba_allowed_networks:
   - "10.0.0.0/8"
   - "192.168.0.0/16"
   - "127.0.0.0/8"
 
-# Utilisateurs Samba
-# password : mot de passe Samba (hash genere par smbpasswd)
+# Utilisateurs Samba (un seul user dans cette version)
 samba_users:
-  - { name: "ynov",     password: "Ynov2026!",      uid: 2001, gid: 2001, fullname: "Utilisateur Ynov" }
-  - { name: "nasadmin", password: "NasAdmin2026!",  uid: 2002, gid: 2002, fullname: "Admin NAS" }
+  - { name: "ynov", password: "Ynov2026!", uid: 2001, gid: 2001, fullname: "Utilisateur Ynov" }
 
-# Definition des shares
-# Chaque share aura son dossier sous {{ samba_shares_root }}/{name}
+# Shares Samba (sans backups - PBS prend le relais)
 samba_shares:
   - name: "public"
     comment: "Partage public - lecture seule"
@@ -48,24 +46,10 @@ samba_shares:
     browsable: "yes"
     writable: "yes"
     guest_ok: "no"
-    valid_users: "ynov nasadmin"
-    write_list: "ynov nasadmin"
+    valid_users: "ynov"
+    write_list: "ynov"
     create_mask: "0664"
     directory_mask: "0775"
     permissions: "2775"
     owner: "root"
     group: "samba-users"
-
-  - name: "backups"
-    comment: "Depot de sauvegardes - admin uniquement"
-    path: "/srv/shares/backups"
-    browsable: "no"
-    writable: "yes"
-    guest_ok: "no"
-    valid_users: "nasadmin"
-    write_list: "nasadmin"
-    create_mask: "0600"
-    directory_mask: "0700"
-    permissions: "0700"
-    owner: "nasadmin"
-    group: "nasadmin"
