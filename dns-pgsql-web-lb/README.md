@@ -9,11 +9,6 @@ Proxmox/Ceph (voir le projet `ansible-bootstrap`), via :
 - **Ansible** (`ansible/`) : installation et configuration des services sur
   ces LXC (BIND9, AdGuard Home, PostgreSQL 17, Nginx+PHP, HAProxy+Keepalived).
 
-> ⚠️ Ce README a été repris intégralement à partir du code actuel
-> (`main.tf`, `outputs.tf`, playbooks, rôles, templates) pour corriger
-> plusieurs imprécisions de l'ancienne version (notamment : `playbook-all.yml`
-> ne déploie **que** DNS + PostgreSQL, pas le cluster web/LB).
-
 ## Architecture déployée
 
 | Service | Rôle | IP | VLAN | Noeud Proxmox | VMID |
