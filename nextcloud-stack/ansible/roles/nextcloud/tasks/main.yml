@@ -1,0 +1,94 @@
+---
+- name: "Creer le repertoire de deploiement"
+  ansible.builtin.file:
+    path: "{{ docker_compose_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: "Creer le repertoire de data persistant"
+  ansible.builtin.file:
+    path: "{{ nextcloud_data_path }}"
+    state: directory
+    owner: "33"
+    group: "33"
+    mode: '0750'
+
+- name: "Generer docker-compose.yml"
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ docker_compose_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: '0640'
+  notify: restart nextcloud
+
+- name: "Pull des images Docker"
+  community.docker.docker_compose_v2_pull:
+    project_src: "{{ docker_compose_dir }}"
+
+- name: "Demarrer la stack Nextcloud"
+  community.docker.docker_compose_v2:
+    project_src: "{{ docker_compose_dir }}"
+    state: present
+  register: nextcloud_up
+
+- name: "Attendre que Nextcloud soit pret (port 8080)"
+  ansible.builtin.wait_for:
+    host: "{{ nextcloud_host_ip }}"
+    port: "{{ nextcloud_host_port }}"
+    timeout: 180
+    delay: 10
+
+- name: "Test HTTP Nextcloud"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ nextcloud_host_port }}/status.php"
+    return_content: yes
+    status_code: 200
+  register: nc_status
+  retries: 12
+  delay: 10
+  until: nc_status.status == 200
+
+- name: "Attendre que occ soit utilisable (init terminee)"
+  ansible.builtin.shell: |
+    docker compose exec -T -u www-data app php occ status 2>&1 | grep -q "installed: true"
+  args:
+    chdir: "{{ docker_compose_dir }}"
+  register: occ_ready
+  retries: 12
+  delay: 10
+  until: occ_ready.rc == 0
+  changed_when: false
+
+- name: "Synchroniser chaque trusted_domain via occ"
+  ansible.builtin.shell: |
+    docker compose exec -T -u www-data app php occ config:system:set \
+      trusted_domains {{ idx }} --value="{{ item }}"
+  args:
+    chdir: "{{ docker_compose_dir }}"
+  loop: "{{ nextcloud_trusted_domains }}"
+  loop_control:
+    index_var: idx
+  changed_when: false
+
+- name: "Verifier la liste finale des trusted_domains"
+  ansible.builtin.shell: |
+    docker compose exec -T -u www-data app php occ config:system:get trusted_domains
+  args:
+    chdir: "{{ docker_compose_dir }}"
+  register: trusted_final
+  changed_when: false
+
+- name: "Afficher les trusted_domains configures"
+  ansible.builtin.debug:
+    msg: "{{ trusted_final.stdout_lines }}"
+
+- name: "Status Nextcloud"
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "NEXTCLOUD INSTALLE AVEC SUCCES"
+      - "============================================================"
+      - "URL locale  : http://{{ nextcloud_host_ip }}:{{ nextcloud_host_port }}"
+      - "Admin       : {{ nextcloud_admin_user }} / {{ nextcloud_admin_password }}"
+      - "============================================================"

@@ -1,0 +1,57 @@
+---
+###############################################################################
+# DEPLOIEMENT NEXTCLOUD (CT VLAN 20 CORE)
+#
+# 1. Activation keyctl + fuse sur le CT (depuis pve-02 via pct)
+# 2. Installation Docker sur nextcloud-01
+# 3. Deploiement Nextcloud + Postgres + Redis (docker compose)
+#
+# Pre-requis :
+#   - CT 207 cree via Terraform (le CT peut etre stoppe ou demarre)
+#   - Collection community.docker installee :
+#     ansible-galaxy collection install community.docker
+#
+# Usage :
+#   ansible-playbook -i inventory/hosts.ini playbook.yml
+###############################################################################
+
+###############################################################################
+# PHASE 1 - Activer keyctl + fuse sur le CT depuis l'hyperviseur
+###############################################################################
+- name: "[1/2] Activation features LXC (keyctl + fuse) depuis l'hyperviseur"
+  hosts: nextcloud   # on cible nextcloud mais delegate_to pve-02
+  gather_facts: false
+  become: false
+
+  roles:
+    - role: lxc_features
+      tags: [lxc, features]
+
+###############################################################################
+# PHASE 2 - Installation Docker + Nextcloud
+###############################################################################
+- name: "[2/2] Installation Docker + Nextcloud sur le CT"
+  hosts: nextcloud
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: "Mise a jour APT"
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: "Paquets de base"
+      ansible.builtin.apt:
+        name:
+          - curl
+          - sudo
+          - vim
+          - net-tools
+        state: present
+
+  roles:
+    - role: docker
+      tags: [docker]
+    - role: nextcloud
+      tags: [nextcloud]

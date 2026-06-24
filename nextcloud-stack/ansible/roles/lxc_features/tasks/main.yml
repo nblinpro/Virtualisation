@@ -1,0 +1,58 @@
+---
+###############################################################################
+# Activation de keyctl et fuse sur le CT depuis l'hyperviseur
+# Ces flags ne peuvent pas etre actives via API token Proxmox (limitation)
+# On le fait donc via 'pct set' en SSH sur l'hyperviseur
+###############################################################################
+
+- name: "Verifier les features actuelles du CT 207"
+  delegate_to: 192.168.3.22
+  ansible.builtin.shell: |
+    grep "^features" /etc/pve/lxc/207.conf || echo "NO_FEATURES"
+  register: current_features
+  changed_when: false
+
+- name: "Afficher les features actuelles"
+  ansible.builtin.debug:
+    msg: "Features actuelles : {{ current_features.stdout }}"
+
+- name: "Activer keyctl + fuse + nesting (si pas deja fait)"
+  delegate_to: 192.168.3.22
+  ansible.builtin.shell: |
+    set -e
+    # Stopper le CT si en cours
+    pct status 207 | grep -q running && pct stop 207 || true
+    sleep 2
+    # Activer toutes les features
+    pct set 207 --features nesting=1,keyctl=1,fuse=1
+    # Redemarrer
+    pct start 207
+    sleep 5
+    echo "OK - features activees"
+  when: "'keyctl=1' not in current_features.stdout or 'fuse=1' not in current_features.stdout"
+  register: features_update
+
+- name: "Afficher le resultat"
+  ansible.builtin.debug:
+    msg: "{{ features_update.stdout_lines | default(['Features deja OK - skip']) }}"
+
+- name: "Verifier que le CT est demarre"
+  delegate_to: 192.168.3.22
+  ansible.builtin.shell: |
+    pct status 207
+  register: ct_status
+  changed_when: false
+
+- name: "Status du CT"
+  ansible.builtin.debug:
+    msg: "{{ ct_status.stdout }}"
+
+- name: "Echec si CT pas demarre"
+  ansible.builtin.fail:
+    msg: "Le CT 207 n'est pas demarre. Verifier manuellement."
+  when: "'running' not in ct_status.stdout"
+
+- name: "Attendre que SSH soit dispo sur le CT (apres restart)"
+  ansible.builtin.wait_for_connection:
+    delay: 5
+    timeout: 60

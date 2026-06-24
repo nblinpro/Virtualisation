@@ -1,0 +1,89 @@
+---
+# docker-compose.yml pour Nextcloud - genere par Ansible
+
+services:
+
+  db:
+    image: postgres:{{ postgres_version }}
+    container_name: nextcloud-db
+    restart: unless-stopped
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: "{{ postgres_db }}"
+      POSTGRES_USER: "{{ postgres_user }}"
+      POSTGRES_PASSWORD: "{{ postgres_password }}"
+    networks:
+      - nc-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ postgres_user }} -d {{ postgres_db }}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:{{ redis_version }}
+    container_name: nextcloud-redis
+    restart: unless-stopped
+    command: redis-server --requirepass "{{ redis_password }}"
+    networks:
+      - nc-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "{{ redis_password }}", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  app:
+    image: nextcloud:{{ nextcloud_version }}
+    container_name: nextcloud-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "{{ nextcloud_host_port }}:80"
+    volumes:
+      - app-data:/var/www/html
+      - "{{ nextcloud_data_path }}:/var/www/html/data"
+    environment:
+      # Base de donnees
+      POSTGRES_HOST: db
+      POSTGRES_DB: "{{ postgres_db }}"
+      POSTGRES_USER: "{{ postgres_user }}"
+      POSTGRES_PASSWORD: "{{ postgres_password }}"
+
+      # Cache Redis
+      REDIS_HOST: redis
+      REDIS_HOST_PASSWORD: "{{ redis_password }}"
+
+      # Admin par defaut
+      NEXTCLOUD_ADMIN_USER: "{{ nextcloud_admin_user }}"
+      NEXTCLOUD_ADMIN_PASSWORD: "{{ nextcloud_admin_password }}"
+
+      # Trusted domains
+      NEXTCLOUD_TRUSTED_DOMAINS: "{{ nextcloud_trusted_domains | join(' ') }}"
+
+      # Performances
+      PHP_MEMORY_LIMIT: 512M
+      PHP_UPLOAD_LIMIT: 1G
+    networks:
+      - nc-internal
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost/status.php"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  db-data:
+    driver: local
+  app-data:
+    driver: local
+
+networks:
+  nc-internal:
+    driver: bridge

@@ -1,0 +1,57 @@
+---
+- name: "Pre-requis APT"
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+      - python3-docker
+    state: present
+    update_cache: yes
+
+- name: "Repertoire keyrings"
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
+- name: "Cle GPG Docker"
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/debian/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: '0644'
+    force: false
+
+- name: "Depot Docker"
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian {{ ansible_distribution_release }} stable"
+    state: present
+    filename: docker
+
+- name: "Installer Docker CE + Compose v2"
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: yes
+
+- name: "Activer Docker au boot"
+  ansible.builtin.systemd:
+    name: docker
+    enabled: yes
+    state: started
+
+- name: "Verifier Docker"
+  ansible.builtin.command: docker --version
+  register: docker_version_check
+  changed_when: false
+
+- name: "Version Docker installee"
+  ansible.builtin.debug:
+    msg: "{{ docker_version_check.stdout }}"

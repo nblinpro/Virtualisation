@@ -1,0 +1,34 @@
+---
+# Reseau
+nextcloud_host_ip: "10.0.20.60"
+nextcloud_host_port: 8080
+nextcloud_wan_ip: "192.168.80.143"
+nextcloud_wan_port: 8090
+
+# Nextcloud
+nextcloud_version: "30-apache"
+nextcloud_admin_user: "ncadmin"
+nextcloud_admin_password: "Ynov2026!ChangeMe"
+
+# Trusted domains (wildcard pour IP DHCP changeante)
+nextcloud_trusted_domains:
+  - "{{ nextcloud_host_ip }}"
+  - "{{ nextcloud_host_ip }}:{{ nextcloud_host_port }}"
+  - "192.168.80.*"
+  - "nextcloud.infra.lan"
+  - "cloud.infra.lan"
+  - "localhost"
+
+# Postgres
+postgres_version: "16-alpine"
+postgres_db: "nextcloud"
+postgres_user: "nextcloud"
+postgres_password: "NextcloudPg2026!"
+
+# Redis
+redis_version: "7-alpine"
+redis_password: "NextcloudRedis2026!"
+
+# Chemins
+nextcloud_data_path: "/var/nextcloud-data"
+docker_compose_dir: "/opt/nextcloud"
