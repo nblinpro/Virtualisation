@@ -1,9 +1,8 @@
 ###############################################################################
 # Terraform - VM Proxmox Backup Server (pbs-01) - POC
 # OVMF/Q35 obligatoire pour PBS 4.x
-# Specs strictes : 1 vCPU / 1 GB RAM / 4 GB disque
+# VLAN 99 BACKUP - 10.0.99.20
 ###############################################################################
-
 terraform {
   required_version = ">= 1.5.0"
   required_providers {
@@ -54,8 +53,8 @@ provider "proxmox" {
 
 resource "proxmox_virtual_environment_vm" "pbs_01" {
   name        = "pbs-01"
-  description = "Proxmox Backup Server - VLAN 60 MONITORING (POC)"
-  tags        = ["pbs", "backup", "vlan60", "monitoring"]
+  description = "Proxmox Backup Server - VLAN 99 BACKUP (POC)"
+  tags        = ["pbs", "backup", "vlan99", "storage"]
 
   node_name = "pve-03"
   vm_id     = 700
@@ -85,10 +84,10 @@ resource "proxmox_virtual_environment_vm" "pbs_01" {
   }
 
   memory {
-    dedicated =2048
+    dedicated = 2048
   }
 
-  # Disque unique 4 GB (systeme + datastore POC)
+  # Disque unique 8 GB (systeme + datastore POC)
   disk {
     datastore_id = "local-lvm"
     interface    = "scsi0"
@@ -102,7 +101,7 @@ resource "proxmox_virtual_environment_vm" "pbs_01" {
   network_device {
     bridge   = "vmbr3"
     model    = "virtio"
-    vlan_id  = 60
+    vlan_id  = 99
     firewall = false
   }
 
@@ -135,15 +134,15 @@ output "pbs_summary" {
   value = {
     hostname    = "pbs-01"
     vmid        = 700
-    ip_target   = "10.0.60.20"
+    ip_target   = "10.0.99.20"
     node        = "pve-03"
-    vlan        = "60 (MONITORING)"
-    web_ui      = "https://10.0.60.20:8007"
+    vlan        = "99 (BACKUP)"
+    web_ui      = "https://10.0.99.20:8007"
     bios        = "OVMF (UEFI)"
     machine     = "Q35"
-    vcpu        = "1"
-    memory      = "1024 MB"
-    disk        = "4 GB (POC)"
+    vcpu        = "2"
+    memory      = "2048 MB"
+    disk        = "8 GB (POC)"
     note        = "Installation initiale interactive via console PVE"
   }
 }

@@ -1,6 +1,7 @@
 ###############################################################################
-# Terraform - VM Proxmox Backup Server (pbs-01)
-# VLAN 60 MONITORING - pve-03
+# Terraform - VM Proxmox Backup Server (pbs-01) - POC
+# OVMF/Q35 obligatoire pour PBS 4.x
+# Specs strictes : 1 vCPU / 1 GB RAM / 4 GB disque
 ###############################################################################
 
 terraform {
@@ -13,9 +14,6 @@ terraform {
   }
 }
 
-# =============================================================================
-# Variables
-# =============================================================================
 variable "proxmox_api_url" {
   type    = string
   default = "https://192.168.3.21:8006/"
@@ -39,12 +37,9 @@ variable "proxmox_ssh_private_key" {
 variable "pbs_iso_path" {
   type        = string
   description = "Chemin de l'ISO PBS sur le datastore local"
-  default     = "local:iso/proxmox-backup-server_4.0-1.iso"
+  default     = "local:iso/proxmox-backup-server_4.2-1.iso"
 }
 
-# =============================================================================
-# Provider
-# =============================================================================
 provider "proxmox" {
   endpoint  = var.proxmox_api_url
   api_token = "${var.proxmox_api_token_id}=${var.proxmox_api_token_secret}"
@@ -57,51 +52,51 @@ provider "proxmox" {
   }
 }
 
-# =============================================================================
-# VM : pbs-01
-# =============================================================================
 resource "proxmox_virtual_environment_vm" "pbs_01" {
   name        = "pbs-01"
-  description = "Proxmox Backup Server - VLAN 60 MONITORING"
+  description = "Proxmox Backup Server - VLAN 60 MONITORING (POC)"
   tags        = ["pbs", "backup", "vlan60", "monitoring"]
 
   node_name = "pve-03"
   vm_id     = 700
 
-  # Demarrage automatique
-  on_boot       = true
+  on_boot = true
   startup {
     order      = 100
     up_delay   = 30
     down_delay = 30
   }
 
+  # Machine Q35 + BIOS UEFI obligatoire pour PBS 4.x
+  machine = "q35"
+  bios    = "ovmf"
+
+  efi_disk {
+    datastore_id      = "local-lvm"
+    file_format       = "raw"
+    type              = "4m"
+    pre_enrolled_keys = false
+  }
+
   cpu {
-    cores   = 1
+    cores   = 2
     type    = "host"
     sockets = 1
   }
 
   memory {
-    dedicated = 1024
+    dedicated =2048
   }
 
-  # Disque systeme (8 GB)
+  # Disque unique 4 GB (systeme + datastore POC)
   disk {
     datastore_id = "local-lvm"
     interface    = "scsi0"
-    iothread     = true
     size         = 8
     file_format  = "raw"
-  }
-
-  # Disque additionnel pour stocker les backups (50 GB)
-  disk {
-    datastore_id = "local-lvm"
-    interface    = "scsi1"
-    iothread     = true
-    size         = 50
-    file_format  = "raw"
+    cache        = "none"
+    discard      = "on"
+    ssd          = true
   }
 
   network_device {
@@ -111,37 +106,31 @@ resource "proxmox_virtual_environment_vm" "pbs_01" {
     firewall = false
   }
 
-  # Boot sur l'ISO PBS
   cdrom {
     file_id   = var.pbs_iso_path
     interface = "ide2"
   }
 
-  boot_order = ["scsi0", "ide2"]
+  boot_order = ["ide2", "scsi0"]
 
   operating_system {
     type = "l26"
   }
 
-  scsi_hardware = "virtio-scsi-pci"
+  scsi_hardware = "virtio-scsi-single"
 
-  # Pas d'agent QEMU au demarrage initial (a installer apres)
   agent {
     enabled = false
   }
 
-  # Empecher Terraform de detruire les disques si on modifie la VM
   lifecycle {
     ignore_changes = [
-      cdrom,    # On retirera l'ISO manuellement apres install
-      started,  # Ne pas redemarrer la VM a chaque apply
+      cdrom,
+      started,
     ]
   }
 }
 
-# =============================================================================
-# Outputs
-# =============================================================================
 output "pbs_summary" {
   value = {
     hostname    = "pbs-01"
@@ -150,6 +139,11 @@ output "pbs_summary" {
     node        = "pve-03"
     vlan        = "60 (MONITORING)"
     web_ui      = "https://10.0.60.20:8007"
+    bios        = "OVMF (UEFI)"
+    machine     = "Q35"
+    vcpu        = "1"
+    memory      = "1024 MB"
+    disk        = "4 GB (POC)"
     note        = "Installation initiale interactive via console PVE"
   }
 }

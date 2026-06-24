@@ -1,6 +1,0 @@
----
-- name: restart unbound
-  ansible.builtin.systemd:
-    name: unbound
-    state: restarted
-    daemon_reload: true
