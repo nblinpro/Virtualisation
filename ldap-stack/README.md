@@ -54,7 +54,7 @@ Si votre bastion tourne sous Alpine, installez Python, ses dépendances de compi
 apk update
 apk add python3 py3-pip python3-dev gcc musl-dev libffi-dev
 pip3 install passlib --break-system-packages
-
+pip install pynetbox --break-system-packages
 ## Procedure de deploiement (3 phases)
 
 ### Phase 1 - Provisionner ldap-01

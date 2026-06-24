@@ -11,7 +11,7 @@ proxmox_api_url = "https://192.168.3.21:8006/"
 # Puis : Datacenter > Permissions > Add > API Token Permission
 # Role: Administrator, Path: /
 proxmox_api_token_id     = "root@pam!terraform-token"
-proxmox_api_token_secret = "4e6e70bc-5d4a-423b-a67f-c5f5b39adb3a"
+proxmox_api_token_secret = "a289e91f-af17-4454-9510-4c5a1b8a01bd"
 
 # Cles SSH
 proxmox_ssh_private_key = "/root/.ssh/proxmox_lab"
