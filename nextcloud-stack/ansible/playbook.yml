@@ -55,3 +55,13 @@
       tags: [docker]
     - role: nextcloud
       tags: [nextcloud]
+
+
+- name: "[3/3] Integration LDAP"
+  hosts: nextcloud
+  become: true
+  gather_facts: false
+
+  roles:
+    - role: nextcloud_ldap
+      tags: [ldap, auth]

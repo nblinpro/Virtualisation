@@ -42,6 +42,19 @@ slapd:389                    NetBox + django-auth-ldap
 
 **Admin LDAP (bind technique)** : `cn=admin,dc=infra,dc=lan` / `LdapAdmin2026!`
 
+---
+
+## Prérequis sur la machine de contrôle (Bastion)
+
+Le filtre Ansible `password_hash` utilisé pour générer les mots de passe de la structure LDAP nécessite la bibliothèque Python `passlib` sur le bastion.
+
+### Sur Alpine Linux
+Si votre bastion tourne sous Alpine, installez Python, ses dépendances de compilation et `passlib` avec :
+```bash
+apk update
+apk add python3 py3-pip python3-dev gcc musl-dev libffi-dev
+pip3 install passlib --break-system-packages
+
 ## Procedure de deploiement (3 phases)
 
 ### Phase 1 - Provisionner ldap-01

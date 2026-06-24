@@ -1,0 +1,147 @@
+---
+###############################################################################
+# Configuration LDAP de Nextcloud via occ
+# Idempotent : s'execute proprement plusieurs fois sans probleme
+###############################################################################
+
+- name: "Verifier que Nextcloud est installe"
+  ansible.builtin.shell: |
+    docker compose exec -T -u www-data app php occ status 2>&1 | grep -q "installed: true"
+  args:
+    chdir: "{{ docker_compose_dir }}"
+  register: nc_installed
+  changed_when: false
+  failed_when: nc_installed.rc != 0
+
+###############################################################################
+# 1. Activer l'app user_ldap
+###############################################################################
+
+- name: "Activer l'app user_ldap (idempotent)"
+  ansible.builtin.shell: |
+    docker compose exec -T -u www-data app php occ app:enable user_ldap
+  args:
+    chdir: "{{ docker_compose_dir }}"
+  register: ldap_app_enable_result
+  changed_when: "'enabled' in ldap_app_enable_result.stdout"
+  failed_when: ldap_app_enable_result.rc != 0 and 'already enabled' not in ldap_app_enable_result.stdout
+
+- name: "Verifier que les commandes ldap sont disponibles"
+  ansible.builtin.shell: |
+    docker compose exec -T -u www-data app php occ list 2>&1 | grep -q "ldap:create-empty-config"
+  args:
+    chdir: "{{ docker_compose_dir }}"
+  register: ldap_cmds_check
+  changed_when: false
+  failed_when: ldap_cmds_check.rc != 0
+
+###############################################################################
+# 2. Creer une config LDAP vide (si elle n'existe pas)
+###############################################################################
+
+- name: "Lister les configurations LDAP existantes"
+  ansible.builtin.shell: |
+    docker compose exec -T -u www-data app php occ ldap:show-config 2>&1 || true
+  args:
+    chdir: "{{ docker_compose_dir }}"
+  register: ldap_configs
+  changed_when: false
+
+- name: "Creer une config LDAP vide (si pas deja la)"
+  ansible.builtin.shell: |
+    docker compose exec -T -u www-data app php occ ldap:create-empty-config
+  args:
+    chdir: "{{ docker_compose_dir }}"
+  when: ldap_config_id not in ldap_configs.stdout
+  register: ldap_created
+  changed_when: ldap_created.rc == 0
+
+###############################################################################
+# 3. Definir tous les parametres LDAP
+###############################################################################
+
+- name: "Configurer les parametres LDAP (idempotent)"
+  ansible.builtin.shell: |
+    docker compose exec -T -u www-data app php occ ldap:set-config {{ ldap_config_id }} "{{ item.key }}" "{{ item.value }}"
+  args:
+    chdir: "{{ docker_compose_dir }}"
+  loop:
+    - { key: "ldapHost",                   value: "{{ ldap_host }}" }
+    - { key: "ldapPort",                   value: "{{ ldap_port }}" }
+    - { key: "ldapAgentName",              value: "{{ ldap_bind_dn }}" }
+    - { key: "ldapAgentPassword",          value: "{{ ldap_bind_password }}" }
+    - { key: "ldapBase",                   value: "{{ ldap_base_dn }}" }
+    - { key: "ldapBaseUsers",              value: "{{ ldap_base_dn }}" }
+    - { key: "ldapBaseGroups",             value: "{{ ldap_base_dn }}" }
+    - { key: "ldapUserFilter",             value: "{{ ldap_user_filter }}" }
+    - { key: "ldapUserFilterObjectclass",  value: "{{ ldap_user_filter_object_class }}" }
+    - { key: "ldapUserFilterMode",         value: "1" }
+    - { key: "ldapLoginFilter",            value: "{{ ldap_login_filter }}" }
+    - { key: "ldapLoginFilterMode",        value: "1" }
+    - { key: "ldapLoginFilterEmail",       value: "0" }
+    - { key: "ldapLoginFilterUsername",    value: "1" }
+    - { key: "ldapLoginFilterAttributes",  value: "uid" }
+    - { key: "ldapEmailAttribute",         value: "{{ ldap_email_attribute }}" }
+    - { key: "ldapUserDisplayName",        value: "{{ ldap_user_display_name }}" }
+    - { key: "ldapTLS",                    value: "{{ '1' if ldap_use_tls else '0' }}" }
+    - { key: "turnOffCertCheck",           value: "1" }
+    - { key: "ldapCacheTTL",               value: "600" }
+    - { key: "ldapConfigurationActive",    value: "1" }
+  loop_control:
+    label: "{{ item.key }} = {{ item.value if item.key != 'ldapAgentPassword' else '***' }}"
+  no_log: false
+  changed_when: false
+
+###############################################################################
+# 4. Tester la configuration LDAP
+###############################################################################
+
+- name: "Tester la connexion LDAP via occ"
+  ansible.builtin.shell: |
+    docker compose exec -T -u www-data app php occ ldap:test-config {{ ldap_config_id }}
+  args:
+    chdir: "{{ docker_compose_dir }}"
+  register: ldap_test
+  changed_when: false
+  failed_when: false
+
+- name: "Resultat test LDAP"
+  ansible.builtin.debug:
+    msg: "{{ ldap_test.stdout_lines }}"
+
+###############################################################################
+# 5. Verifier les users LDAP trouves
+###############################################################################
+
+- name: "Lister les utilisateurs LDAP visibles depuis Nextcloud"
+  ansible.builtin.shell: |
+    docker compose exec -T -u www-data app php occ ldap:search "*"
+  args:
+    chdir: "{{ docker_compose_dir }}"
+  register: ldap_users
+  changed_when: false
+  failed_when: false
+
+- name: "Affichage des utilisateurs LDAP"
+  ansible.builtin.debug:
+    msg: "{{ ldap_users.stdout_lines }}"
+
+###############################################################################
+# 6. Resume final
+###############################################################################
+
+- name: "Configuration LDAP terminee"
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "LDAP CONFIGURE POUR NEXTCLOUD"
+      - "============================================================"
+      - "Serveur     : {{ ldap_host }}:{{ ldap_port }}"
+      - "Base DN     : {{ ldap_base_dn }}"
+      - "Filtre login: {{ ldap_login_filter }}"
+      - "Config ID   : {{ ldap_config_id }}"
+      - ""
+      - "Tu peux maintenant te connecter avec :"
+      - "  teacher / Ynov2026!"
+      - "  student / Ynov2026!"
+      - "============================================================"

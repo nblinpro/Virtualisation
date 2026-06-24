@@ -32,3 +32,25 @@ redis_password: "NextcloudRedis2026!"
 # Chemins
 nextcloud_data_path: "/var/nextcloud-data"
 docker_compose_dir: "/opt/nextcloud"
+
+###############################################################################
+# Integration LDAP (meme config que NetBox / GLPI pour coherence)
+###############################################################################
+
+ldap_host: "10.0.20.40"
+ldap_port: 389
+ldap_use_tls: false
+
+ldap_bind_dn: "cn=admin,dc=infra,dc=lan"
+ldap_bind_password: "LdapAdmin2026!"
+
+ldap_base_dn: "ou=people,dc=infra,dc=lan"
+ldap_user_filter_object_class: "inetOrgPerson"
+ldap_user_filter: "(objectClass=inetOrgPerson)"
+ldap_login_filter: "(&(objectclass=inetOrgPerson)(uid=%uid))"
+
+ldap_user_display_name: "cn"
+ldap_email_attribute: "mail"
+ldap_quota_attribute: ""
+
+ldap_config_id: "s01"
